@@ -1,5 +1,4 @@
 @page "/catalog"
-@rendermode InteractiveServer
 @using ChromePolicyManager.Admin.Services
 @using ChromePolicyManager.Admin.Components.Pages.Dialogs
 @inject PolicyApiClient Api
@@ -230,10 +229,11 @@ else if (_stats is null && !_loading)
                 }
             </MudTd>
             <MudTd>
+                @{ var entry = context; }
                 <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small"
-                               OnClick="() => ShowDetails(context)" />
+                               OnClick="@(async () => await ShowDetails(entry))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Primary"
-                               OnClick="() => AddToPolicySet(context)" />
+                               OnClick="@(async () => await AddToPolicySet(entry))" />
             </MudTd>
         </RowTemplate>
     </MudTable>
