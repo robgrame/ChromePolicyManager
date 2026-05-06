@@ -1,0 +1,201 @@
+<#
+.SYNOPSIS
+    Chrome Policy Manager - Detection Script
+    Checks whether Chrome policies on this device match the expected state from the central API.
+
+.DESCRIPTION
+    This script is deployed via Intune Proactive Remediation (Detection).
+    It contacts the Chrome Policy Manager API to get the effective policy for this device,
+    then compares it against the currently applied registry state.
+    
+    Exit 0 = Compliant (no remediation needed)
+    Exit 1 = Non-compliant (remediation needed)
+
+.NOTES
+    Requires: 64-bit PowerShell execution
+    Registry: HKLM\SOFTWARE\Policies\Google\Chrome
+    Manifest: HKLM\SOFTWARE\ChromePolicyManager\Manifest
+#>
+
+#Requires -RunAsAdministrator
+
+$ErrorActionPreference = "Stop"
+
+# Configuration - these should be set during deployment
+$ApiBaseUrl = "https://your-chrome-policy-api.azurewebsites.net"
+$TenantId = "YOUR_TENANT_ID"
+$ClientId = "YOUR_CLIENT_APP_ID"  # App registration for device auth
+$Scope = "api://chrome-policy-manager/.default"
+
+# Paths
+$ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
+$ChromeRecommendedPath = "HKLM:\SOFTWARE\Policies\Google\Chrome\Recommended"
+$ManifestPath = "HKLM:\SOFTWARE\ChromePolicyManager"
+$ManifestValueName = "PolicyHash"
+$LogPath = "$env:ProgramData\ChromePolicyManager\detection.log"
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] [$Level] $Message"
+    $logDir = Split-Path $LogPath -Parent
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+    Add-Content -Path $LogPath -Value $logEntry -ErrorAction SilentlyContinue
+}
+
+function Get-DeviceId {
+    # Get Entra device ID from dsregcmd
+    try {
+        $dsregOutput = dsregcmd /status 2>&1
+        $deviceIdLine = $dsregOutput | Select-String "DeviceId\s*:\s*(.+)"
+        if ($deviceIdLine) {
+            return $deviceIdLine.Matches[0].Groups[1].Value.Trim()
+        }
+    }
+    catch {
+        Write-Log "Failed to get device ID from dsregcmd: $_" "ERROR"
+    }
+    return $null
+}
+
+function Get-AccessToken {
+    # Acquire token using device identity (MSAL.PS or certificate-based)
+    try {
+        # Method 1: Try using the device certificate from Entra join
+        $certThumbprint = (Get-ChildItem Cert:\LocalMachine\My | 
+            Where-Object { $_.Subject -match "CN=.*" -and $_.Issuer -match "MS-Organization-Access" } |
+            Select-Object -First 1).Thumbprint
+
+        if ($certThumbprint) {
+            # Use MSAL with certificate
+            $tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+            
+            $cert = Get-ChildItem "Cert:\LocalMachine\My\$certThumbprint"
+            $base64Thumbprint = [Convert]::ToBase64String($cert.GetCertHash())
+            
+            # Create JWT assertion for client credentials with cert
+            $now = [DateTimeOffset]::UtcNow
+            $header = @{ alg = "RS256"; typ = "JWT"; x5t = $base64Thumbprint } | ConvertTo-Json -Compress
+            $payload = @{
+                aud = $tokenEndpoint
+                iss = $ClientId
+                sub = $ClientId
+                jti = [Guid]::NewGuid().ToString()
+                nbf = $now.ToUnixTimeSeconds()
+                exp = $now.AddMinutes(10).ToUnixTimeSeconds()
+            } | ConvertTo-Json -Compress
+            
+            $headerB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($header)).TrimEnd('=').Replace('+','-').Replace('/','_')
+            $payloadB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)).TrimEnd('=').Replace('+','-').Replace('/','_')
+            $dataToSign = "$headerB64.$payloadB64"
+            
+            $rsaProvider = $cert.PrivateKey
+            $signedBytes = $rsaProvider.SignData([Text.Encoding]::UTF8.GetBytes($dataToSign), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            $signatureB64 = [Convert]::ToBase64String($signedBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+            
+            $clientAssertion = "$dataToSign.$signatureB64"
+            
+            $body = @{
+                client_id = $ClientId
+                scope = $Scope
+                client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                client_assertion = $clientAssertion
+                grant_type = "client_credentials"
+            }
+            
+            $response = Invoke-RestMethod -Uri $tokenEndpoint -Method POST -Body $body -ContentType "application/x-www-form-urlencoded"
+            return $response.access_token
+        }
+    }
+    catch {
+        Write-Log "Certificate-based auth failed: $_" "WARN"
+    }
+    
+    # Method 2: Fallback to managed identity if running in Azure/hybrid
+    try {
+        $imdsUrl = "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=api://chrome-policy-manager"
+        $response = Invoke-RestMethod -Uri $imdsUrl -Headers @{Metadata="true"} -ErrorAction Stop
+        return $response.access_token
+    }
+    catch {
+        Write-Log "Managed identity auth not available: $_" "WARN"
+    }
+    
+    return $null
+}
+
+function Get-CurrentPolicyHash {
+    # Read the stored hash of last applied policy
+    try {
+        if (Test-Path $ManifestPath) {
+            return (Get-ItemProperty -Path $ManifestPath -Name $ManifestValueName -ErrorAction SilentlyContinue).$ManifestValueName
+        }
+    }
+    catch { }
+    return $null
+}
+
+# Main detection logic
+try {
+    Write-Log "Detection script started"
+    
+    $deviceId = Get-DeviceId
+    if (-not $deviceId) {
+        Write-Log "Cannot determine device ID - device may not be Entra joined" "ERROR"
+        Write-Output "Cannot determine device ID"
+        exit 1
+    }
+    Write-Log "Device ID: $deviceId"
+    
+    # Get access token
+    $token = Get-AccessToken
+    if (-not $token) {
+        Write-Log "Cannot acquire access token - skipping API check, using local manifest" "WARN"
+        # If we can't reach the API, check if we have any policy applied
+        $localHash = Get-CurrentPolicyHash
+        if ($localHash) {
+            Write-Log "Local policy hash exists: $localHash - assuming compliant"
+            Write-Output "Compliant (offline - using cached state)"
+            exit 0
+        }
+        else {
+            Write-Log "No local policy hash - non-compliant"
+            Write-Output "Non-compliant (no policies applied and cannot reach API)"
+            exit 1
+        }
+    }
+    
+    # Call API to get effective policy
+    $headers = @{
+        Authorization = "Bearer $token"
+        "Content-Type" = "application/json"
+    }
+    
+    $effectivePolicy = Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET
+    
+    if (-not $effectivePolicy -or (-not $effectivePolicy.mandatoryPolicies -and -not $effectivePolicy.recommendedPolicies)) {
+        Write-Log "No policies assigned to this device"
+        Write-Output "No policies assigned"
+        exit 0
+    }
+    
+    # Compare server hash with local hash
+    $serverHash = $effectivePolicy.hash
+    $localHash = Get-CurrentPolicyHash
+    
+    if ($serverHash -eq $localHash) {
+        Write-Log "Policy hash matches - device is compliant (Hash: $serverHash)"
+        Write-Output "Compliant (Hash: $serverHash)"
+        exit 0
+    }
+    else {
+        Write-Log "Policy hash mismatch - Server: $serverHash, Local: $localHash" "WARN"
+        Write-Output "Non-compliant (Server: $serverHash, Local: $localHash)"
+        exit 1
+    }
+}
+catch {
+    Write-Log "Detection script error: $_" "ERROR"
+    Write-Output "Error during detection: $_"
+    exit 1
+}

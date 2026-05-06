@@ -1,0 +1,37 @@
+# ChromePolicyManager
+
+## Binaries & build output
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+
+## IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+## .NET
+*.nupkg
+project.lock.json
+*.nuget.props
+*.nuget.targets
+
+## Database (dev)
+*.db
+*.db-shm
+*.db-wal
+
+## Secrets
+appsettings.Development.json
+appsettings.*.local.json
+
+## Logs
+*.log
+logs/
+
+## OS
+Thumbs.db
+.DS_Store
