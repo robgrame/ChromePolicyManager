@@ -107,12 +107,21 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<CatalogStatsDto>("/api/catalog/stats", JsonOptions) ?? new();
     }
 
-    public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version)
+    public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version, bool diffMode = false)
     {
         using var content = new MultipartFormDataContent();
         content.Add(new StreamContent(zipStream), "admxZip", fileName);
         content.Add(new StringContent(version), "version");
+        content.Add(new StringContent(diffMode.ToString().ToLower()), "diffMode");
         var response = await _http.PostAsync("/api/catalog/import", content);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
+    }
+
+    public async Task<CatalogImportResultDto> ImportCatalogFromUrlAsync(string version, bool diffMode = false)
+    {
+        var url = $"/api/catalog/import-from-url?version={Uri.EscapeDataString(version)}&diffMode={diffMode.ToString().ToLower()}";
+        var response = await _http.PostAsync(url, null);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
     }
@@ -227,5 +236,8 @@ public class CatalogImportResultDto
     public int Mandatory { get; set; }
     public int Recommended { get; set; }
     public int Categories { get; set; }
+    public int Added { get; set; }
+    public int Removed { get; set; }
+    public int Updated { get; set; }
     public List<string> Warnings { get; set; } = [];
 }

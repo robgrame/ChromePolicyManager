@@ -16,12 +16,13 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = 200 * 1024 * 1024; // 200MB
 });
 
-// API client
+// API client with extended timeout for large file uploads (ADMX zip ~113MB)
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "https://cpm-dev-api.azurewebsites.net";
 builder.Services.AddHttpClient<PolicyApiClient>(client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromMinutes(10); // ADMX upload can be slow
 });
 
 var app = builder.Build();

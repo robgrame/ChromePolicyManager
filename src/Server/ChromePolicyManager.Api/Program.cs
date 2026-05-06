@@ -45,6 +45,7 @@ builder.Services.AddScoped<DeviceReportingService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddSingleton<ChromePolicyValidator>();
 builder.Services.AddSingleton<AdmxParserService>();
+builder.Services.AddHttpClient(); // For ADMX download from Google
 
 // Service Bus - async device report processing
 builder.Services.AddSingleton<DeviceReportQueue>();

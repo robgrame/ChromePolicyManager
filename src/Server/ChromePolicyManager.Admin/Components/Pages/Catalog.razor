@@ -49,49 +49,109 @@ else if (_stats is null && !_loading)
 <MudExpansionPanels Class="mb-4">
     <MudExpansionPanel Text="Import ADMX Templates" Icon="@Icons.Material.Filled.Upload">
         <MudText Typo="Typo.body2" Class="mb-3">
-            Upload the <code>policy_templates.zip</code> from
-            <MudLink Href="https://chromeenterprise.google/browser/download/#manage-policies-tab" Target="_blank">
-                Chrome Enterprise
-            </MudLink>.
-            The parser extracts all policy definitions from <code>chrome.admx</code> + <code>en-US/chrome.adml</code>.
+            Import Chrome policy definitions from ADMX templates. Choose one method:
         </MudText>
-        <MudGrid>
-            <MudItem xs="12" sm="6">
-                <MudFileUpload T="IBrowserFile" Accept=".zip" FilesChanged="OnFileSelected" MaximumFileCount="1">
-                    <ActivatorContent>
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">
-                            Select ZIP File
+        
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
+            @* Tab 1: Download from Google (recommended — avoids large file upload through SignalR) *@
+            <MudTabPanel Text="Download from Google" Icon="@Icons.Material.Filled.CloudDownload">
+                <MudText Typo="Typo.body2" Class="mb-3 mt-3">
+                    The server downloads the latest Chrome ADMX templates directly from Google Enterprise.
+                    This is the recommended method (avoids 113MB upload through the browser).
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="_importVersion" Label="Version Label" Placeholder="e.g. 136.0.7103.48" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudSelect @bind-Value="_importMode" Label="Import Mode" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@("full")">Full (replace all)</MudSelectItem>
+                            <MudSelectItem Value="@("diff")">Differential (delta only)</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="3" Class="d-flex align-end">
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_importing)"
+                                   OnClick="ImportFromUrlAsync" StartIcon="@Icons.Material.Filled.Download">
+                            @if (_importing)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <text>Downloading...</text>
+                            }
+                            else
+                            {
+                                <text>Import from Google</text>
+                            }
                         </MudButton>
-                    </ActivatorContent>
-                </MudFileUpload>
-                @if (_selectedFile is not null)
-                {
-                    <MudText Typo="Typo.body2" Class="mt-2">Selected: @_selectedFile.Name (@((_selectedFile.Size / 1024 / 1024).ToString("F1")) MB)</MudText>
-                }
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudTextField @bind-Value="_importVersion" Label="Version Label" Placeholder="e.g. 136.0.7103.48" Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="3" Class="d-flex align-end">
-                <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_selectedFile is null || _importing)"
-                           OnClick="ImportAsync" StartIcon="@Icons.Material.Filled.DataObject">
-                    @if (_importing)
-                    {
-                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                        <text>Importing...</text>
-                    }
-                    else
-                    {
-                        <text>Import</text>
-                    }
-                </MudButton>
-            </MudItem>
-        </MudGrid>
+                    </MudItem>
+                </MudGrid>
+            </MudTabPanel>
+
+            @* Tab 2: Manual file upload (fallback for air-gapped environments) *@
+            <MudTabPanel Text="Upload ZIP" Icon="@Icons.Material.Filled.UploadFile">
+                <MudText Typo="Typo.body2" Class="mb-3 mt-3">
+                    Upload <code>policy_templates.zip</code> from
+                    <MudLink Href="https://chromeenterprise.google/browser/download/#manage-policies-tab" Target="_blank">
+                        Chrome Enterprise
+                    </MudLink>. For air-gapped environments only.
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" sm="5">
+                        <MudFileUpload T="IBrowserFile" Accept=".zip" FilesChanged="OnFileSelected" MaximumFileCount="1">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">
+                                    Select ZIP File
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                        @if (_selectedFile is not null)
+                        {
+                            <MudText Typo="Typo.body2" Class="mt-2">Selected: @_selectedFile.Name (@((_selectedFile.Size / 1024 / 1024).ToString("F1")) MB)</MudText>
+                        }
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_importVersion" Label="Version Label" Placeholder="e.g. 136.0.7103.48" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudSelect @bind-Value="_importMode" Label="Mode" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@("full")">Full</MudSelectItem>
+                            <MudSelectItem Value="@("diff")">Diff</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="2" Class="d-flex align-end">
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_selectedFile is null || _importing)"
+                                   OnClick="ImportAsync" StartIcon="@Icons.Material.Filled.DataObject">
+                            @if (_importing)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <text>Importing...</text>
+                            }
+                            else
+                            {
+                                <text>Import</text>
+                            }
+                        </MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudTabPanel>
+        </MudTabs>
+
+        @if (!string.IsNullOrEmpty(_importError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3" ShowCloseIcon="true" CloseIconClicked="() => _importError = null">
+                ❌ @_importError
+            </MudAlert>
+        }
         @if (_importResult is not null)
         {
             <MudAlert Severity="Severity.Success" Class="mt-3">
                 ✅ @_importResult.Message — @_importResult.Mandatory mandatory, @_importResult.Recommended recommended across @_importResult.Categories categories
             </MudAlert>
+            @if (_importResult.Added > 0 || _importResult.Removed > 0 || _importResult.Updated > 0)
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-2" Dense="true">
+                    Delta: +@_importResult.Added added, ~@_importResult.Updated updated, -@_importResult.Removed removed
+                </MudAlert>
+            }
             @if (_importResult.Warnings.Count > 0)
             {
                 <MudAlert Severity="Severity.Warning" Class="mt-2">
@@ -312,8 +372,10 @@ else if (_stats is null && !_loading)
     // Import state
     private IBrowserFile? _selectedFile;
     private string _importVersion = "";
+    private string _importMode = "full";
     private bool _importing;
     private CatalogImportResultDto? _importResult;
+    private string? _importError;
 
     // Details dialog
     private bool _showDetails;
@@ -361,16 +423,16 @@ else if (_stats is null && !_loading)
 
     private void OnFileSelected(IBrowserFile file) => _selectedFile = file;
 
-    private async Task ImportAsync()
+    private async Task ImportFromUrlAsync()
     {
-        if (_selectedFile is null) return;
         _importing = true;
         _importResult = null;
+        _importError = null;
+        StateHasChanged();
 
         try
         {
-            using var stream = _selectedFile.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024);
-            _importResult = await Api.ImportCatalogAsync(stream, _selectedFile.Name, _importVersion);
+            _importResult = await Api.ImportCatalogFromUrlAsync(_importVersion, _importMode == "diff");
 
             // Reload data
             _stats = await Api.GetCatalogStatsAsync();
@@ -382,11 +444,46 @@ else if (_stats is null && !_loading)
         }
         catch (Exception ex)
         {
+            _importError = ex.Message;
             Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
         }
         finally
         {
             _importing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        if (_selectedFile is null) return;
+        _importing = true;
+        _importResult = null;
+        _importError = null;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = _selectedFile.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024);
+            _importResult = await Api.ImportCatalogAsync(stream, _selectedFile.Name, _importVersion, _importMode == "diff");
+
+            // Reload data
+            _stats = await Api.GetCatalogStatsAsync();
+            _categories = await Api.GetCatalogCategoriesAsync();
+            _entries = await Api.GetCatalogAsync();
+            ApplyFilters();
+
+            Snackbar.Add($"Successfully imported {_importResult.TotalParsed} policies!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _importError = ex.Message;
+            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _importing = false;
+            StateHasChanged();
         }
     }
 
