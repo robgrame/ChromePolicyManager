@@ -1,181 +1,247 @@
 # Chrome Policy Manager
 
-## Overview
+> **Server-side Chrome policy delivery for Entra ID–only (Azure AD joined) devices — bypassing the Group Policy dependency that breaks ADMX-based Chrome settings on cloud-managed endpoints.**
 
-Chrome policies deployed via Intune Settings Catalog **fail on Entra ID-only (Azure AD joined) devices** because the ADMX ingestion/GP registry mirroring chain is broken without traditional domain join.
+[![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com/)
+[![Azure](https://img.shields.io/badge/Azure-Deployed-blue)](https://azure.microsoft.com/)
+[![Intune](https://img.shields.io/badge/Intune-Proactive%20Remediation-green)](https://learn.microsoft.com/en-us/mem/intune/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**ChromePolicyManager** bypasses the broken pipeline by writing Chrome policies directly to the Windows registry (`HKLM\SOFTWARE\Policies\Google\Chrome`) via a PowerShell remediation script, with central management through a .NET 10 Web API.
+## 🎯 The Problem
 
-## Architecture
+Chrome policies deployed via **Intune Settings Catalog** (ADMX-backed) **fail silently** on Entra ID–only joined devices. This happens because:
+
+1. **GP Notification dependency** — Chrome's `PolicyLoaderWin` calls `RegisterGPNotification()` which requires a domain-joined machine
+2. **Domain join gate** — `mdm_utils.cc` checks `IsEnrolledToDomain()` before applying policies
+3. **ADMX registry mirroring** — Intune writes to `HKLM:\SOFTWARE\Microsoft\PolicyManager\providers\...` but the GP Client Service never mirrors them to `HKLM:\SOFTWARE\Policies\Google\Chrome` on cloud-only devices
+
+This affects **ALL Chrome policies equally** on cloud-only joined devices — not just specific ones.
+
+## 💡 The Solution
+
+Chrome Policy Manager implements a **server-side policy resolution engine** that delivers Chrome policies directly to device registries via Intune Proactive Remediation scripts, completely bypassing the broken GP pipeline.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Azure Cloud                                   │
-│                                                                   │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ Azure APIM   │───▶│ .NET 10 API  │───▶│  Azure SQL       │   │
-│  │ (Gateway)    │    │ (App Service)│    │  (Data Store)    │   │
-│  └──────┬───────┘    └──────┬───────┘    └──────────────────┘   │
-│         │                   │                                     │
-│         │            ┌──────┴───────┐    ┌──────────────────┐   │
-│         │            │ MS Graph     │    │ App Configuration│   │
-│         │            │ (Groups)     │    │ (Settings)       │   │
-│         │            └──────────────┘    └──────────────────┘   │
-└─────────┼───────────────────────────────────────────────────────┘
-          │
-          │ HTTPS (device auth)
-          │
-┌─────────┴───────────────────────────────────────────────────────┐
-│  Windows Device (Entra ID Joined)                                │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Intune Proactive Remediation                             │   │
-│  │  ┌─────────────────┐    ┌───────────────────────────┐   │   │
-│  │  │ Detection Script │    │ Remediation Script         │   │   │
-│  │  │ (hash compare)   │    │ (fetch policy, write reg) │   │   │
-│  │  └─────────────────┘    └───────────────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-│  Registry: HKLM\SOFTWARE\Policies\Google\Chrome\*                │
-│  Manifest: HKLM\SOFTWARE\ChromePolicyManager\                    │
+│                        ARCHITECTURE                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────┐    ┌───────────┐    ┌──────────────────────────┐  │
+│  │  Admin   │───▶│  REST API │◀───│  Intune Remediation      │  │
+│  │  UI      │    │  (.NET 9) │    │  (PowerShell scripts)    │  │
+│  │ (Blazor) │    └─────┬─────┘    └──────────────────────────┘  │
+│  └──────────┘          │                                         │
+│                   ┌────┴────┐                                    │
+│                   │ SQL DB  │  ← PolicySets, Versions,           │
+│                   │         │    Assignments, DeviceState         │
+│                   └────┬────┘                                    │
+│                        │                                         │
+│                   ┌────┴────┐                                    │
+│                   │ MS Graph│  ← Group membership resolution     │
+│                   └─────────┘                                    │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Components
-
-### Server (`src/Server/ChromePolicyManager.Api`)
-- **.NET 10 Minimal API** with Entity Framework Core
-- **Policy Management**: Create policy sets with immutable versions (draft → active → archived)
-- **Assignments**: Assign policy versions to Entra ID security groups with priority
-- **Effective Policy Resolution**: Server-side group membership resolution via Microsoft Graph, conflict resolution by priority (lower number wins)
-- **Device Monitoring**: Compliance reporting, offline detection, error tracking
-- **Schema Validation**: Validates Chrome policy types (boolean, integer, string, list, dictionary)
-- **Audit Logging**: Full audit trail of all operations
-
-### Client (`src/Client/`)
-- **Detect-ChromePolicy.ps1**: Detection script — compares local policy hash with server-expected hash
-- **Remediate-ChromePolicy.ps1**: Remediation script — fetches effective policy, writes registry, removes stale keys, reports compliance
-
-## Key Features
+## ✨ Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **Versioning** | Immutable policy versions with draft/active/archived lifecycle and rollback |
-| **Priority** | Lower number = higher priority. Same policy key from multiple groups → highest priority wins |
-| **Scope** | Supports both Mandatory and Recommended Chrome policy paths |
-| **Stale Removal** | Maintains local manifest of owned keys; removes keys no longer in policy |
-| **Monitoring** | Tracks device check-ins, flags offline >24h, reports errors per device |
-| **Validation** | Validates policy names, types, and values against Chrome's expected schema |
-| **Audit** | Full audit trail: who changed what, when, with details |
+| **ADMX Catalog Ingestion** | Parse Chrome ADMX/ADML templates → browse 700+ policies with descriptions, types, categories |
+| **PolicySet Versioning** | Immutable versions (Draft → Active → Archived) with hash-based change detection |
+| **Group-Based Targeting** | Assign policies to Entra ID security groups with priority-based conflict resolution |
+| **Mandatory & Recommended** | Support both Chrome policy scopes per assignment |
+| **Effective Policy Resolution** | Server resolves device → groups → assignments → merged settings (lower priority wins) |
+| **Device Observability** | Real-time compliance dashboard, offline detection, error tracking |
+| **Intune Delivery** | Proactive Remediation hourly check → detect drift → apply policies via registry |
+| **Audit Trail** | Full audit logging for all policy changes and device interactions |
 
-## Infrastructure (Planned)
+## 🏗️ Project Structure
 
-| Component | Purpose |
-|-----------|---------|
-| **Azure APIM** | Gateway: Management API (admin) + Device API (clients), rate limiting, auth |
-| **Azure App Configuration** | Centralized config: feature flags, thresholds, URLs |
-| **Azure App Service** | Host .NET 10 API (potentially split: management + device processing) |
-| **Azure SQL** | Production database |
-| **Azure Key Vault** | Secrets, certificates, connection strings |
+```
+ChromePolicyManager/
+├── src/
+│   ├── Server/
+│   │   ├── ChromePolicyManager.Api/        # REST API (.NET 9 Minimal API)
+│   │   │   ├── Data/                       # EF Core DbContext + models
+│   │   │   ├── Endpoints/                  # Policy, Assignment, Device, Catalog, Monitoring
+│   │   │   ├── Models/                     # PolicySet, Version, Assignment, CatalogEntry
+│   │   │   └── Services/                   # AdmxParser, EffectivePolicy, Graph, Reporting
+│   │   └── ChromePolicyManager.Admin/      # Blazor Server Admin UI (MudBlazor)
+│   │       └── Components/Pages/           # Dashboard, Catalog, Policies, Assignments, Devices
+│   └── Client/
+│       ├── Detect-ChromePolicy.ps1         # Intune detection script
+│       └── Remediate-ChromePolicy.ps1      # Intune remediation script
+├── infra/
+│   └── Deploy-Infrastructure.ps1           # One-click Azure deployment
+└── tools/                                  # ADMX template downloads (gitignored)
+```
 
-## API Endpoints
-
-### Management API (Admin)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/policies` | List all policy sets |
-| POST | `/api/policies` | Create policy set |
-| GET | `/api/policies/{id}` | Get policy set with versions |
-| POST | `/api/policies/{id}/versions` | Create new version (validated) |
-| POST | `/api/policies/versions/{id}/promote` | Promote version to active |
-| POST | `/api/policies/{id}/rollback/{versionId}` | Rollback to previous version |
-| GET | `/api/assignments` | List assignments |
-| POST | `/api/assignments` | Create assignment (group + priority) |
-| PUT | `/api/assignments/{id}/priority` | Update priority |
-| DELETE | `/api/assignments/{id}` | Remove assignment |
-| GET | `/api/monitoring/dashboard` | Compliance overview |
-| GET | `/api/monitoring/offline-devices` | Devices offline >N hours |
-| GET | `/api/monitoring/error-devices` | Devices with errors |
-
-### Device API (Client Scripts)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/devices/{deviceId}/effective-policy` | Get merged effective policy |
-| POST | `/api/devices/{deviceId}/report` | Submit compliance report |
-| GET | `/api/devices/{deviceId}/history` | Get device report history |
-
-## Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
-- .NET 10 SDK
-- Azure subscription (for production)
-- Entra ID tenant with app registration
 
-### Local Development
-```bash
-cd src/Server/ChromePolicyManager.Api
-dotnet run
-```
-The API starts with SQLite and auto-creates the database. Access OpenAPI at `https://localhost:5001/openapi/v1.json`.
+- .NET 9 SDK
+- Azure subscription (with Intune license for remediation)
+- `az` CLI authenticated
+- `gh` CLI (optional, for repo operations)
 
-### Deploy Client Scripts
-1. Configure `$ApiBaseUrl`, `$TenantId`, `$ClientId` in both scripts
-2. In Intune → Devices → Remediation:
-   - Detection: `Detect-ChromePolicy.ps1`
-   - Remediation: `Remediate-ChromePolicy.ps1`
-   - Run as: System (64-bit)
-   - Schedule: Every 1 hour (recommended)
+### 1. Deploy Infrastructure
 
-### Create Your First Policy
-```bash
-# 1. Create a policy set
-curl -X POST https://localhost:5001/api/policies \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Security Baseline", "description": "Standard security policies for all devices"}'
-
-# 2. Create a version with Chrome settings
-curl -X POST https://localhost:5001/api/policies/{policySetId}/versions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "version": "1.0.0",
-    "settingsJson": "{\"PasswordManagerEnabled\": false, \"SafeBrowsingProtectionLevel\": 2, \"SyncDisabled\": true, \"URLBlocklist\": [\"*://malware.example.com\"]}"
-  }'
-
-# 3. Promote the version
-curl -X POST https://localhost:5001/api/policies/versions/{versionId}/promote
-
-# 4. Assign to an Entra group
-curl -X POST https://localhost:5001/api/assignments \
-  -H "Content-Type: application/json" \
-  -d '{
-    "policySetVersionId": "{versionId}",
-    "entraGroupId": "group-guid-from-entra",
-    "groupName": "All Corporate Devices",
-    "priority": 10,
-    "scope": 0
-  }'
+```powershell
+cd infra
+.\Deploy-Infrastructure.ps1
 ```
 
-## How It Works (Technical)
+This creates: Resource Group, SQL Server (Entra-only auth), App Service Plan (B1), Web Apps (API + Admin), Key Vault, Service Bus, App Configuration.
 
-### Why Intune Settings Catalog Fails
-1. Intune ADMX ingestion writes to `HKLM\SOFTWARE\Microsoft\PolicyManager\providers\{GUID}\...`
-2. This relies on GP Client Service to mirror to `HKLM\SOFTWARE\Policies\Google\Chrome`
-3. On Entra ID-only devices, GP Client mirroring is broken (no `RegisterGPNotification`, no domain join)
+### 2. Import Chrome Policy Catalog
+
+Download the [Chrome ADMX templates](https://chromeenterprise.google/browser/download/#manage-policies-tab) and upload via the Admin UI or API:
+
+```bash
+# Via API (multipart upload)
+curl -X POST https://your-api.azurewebsites.net/api/catalog/import \
+  -F "admxZip=@policy_templates.zip" \
+  -F "version=136.0"
+```
+
+### 3. Create Policy Sets
+
+Use the Admin UI at `https://your-admin.azurewebsites.net/catalog` to:
+1. Browse the catalog → filter by category/type → view descriptions
+2. Select policies and configure values
+3. Create PolicySets (e.g., "Security Baseline", "User Experience")
+4. Add versions with specific settings
+5. Assign to Entra ID groups with priority
+
+### 4. Deploy Intune Remediation
+
+The deployment script automatically creates a Proactive Remediation in Intune that:
+- Runs **hourly** on targeted devices
+- **Detects** drift by comparing local policy hash vs server hash
+- **Remediates** by writing Chrome registry policies directly to `HKLM:\SOFTWARE\Policies\Google\Chrome`
+
+## 🔧 API Endpoints
+
+### Policy Catalog
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/catalog` | Browse policy catalog (filter: `?category=&search=&dataType=&recommended=`) |
+| `GET` | `/api/catalog/categories` | List available categories |
+| `GET` | `/api/catalog/stats` | Import statistics |
+| `POST` | `/api/catalog/import` | Import ADMX zip (multipart/form-data) |
+
+### Policy Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/policies` | List all PolicySets with versions |
+| `POST` | `/api/policies` | Create new PolicySet |
+| `POST` | `/api/policies/{id}/versions` | Add version with settings JSON |
+| `POST` | `/api/policies/versions/{id}/promote` | Promote Draft → Active |
+| `POST` | `/api/policies/{id}/rollback/{versionId}` | Rollback to previous version |
+
+### Assignments
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/assignments` | List all assignments |
+| `POST` | `/api/assignments` | Create group assignment (priority + scope) |
+| `DELETE` | `/api/assignments/{id}` | Remove assignment |
+
+### Device Operations
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/devices/{id}/effective-policy` | Resolve effective policy for device |
+| `POST` | `/api/devices/{id}/report` | Device reports compliance status |
+| `GET` | `/api/monitoring/dashboard` | Compliance dashboard data |
+| `GET` | `/api/monitoring/offline` | Offline devices (>N hours) |
+| `GET` | `/api/monitoring/errors` | Devices with errors |
+| `GET` | `/health` | Health check |
+
+## 📊 How Policy Resolution Works
+
+```
+Client Device → API: "What policies apply to me?" (GET /devices/{id}/effective-policy)
+                      │
+                      ▼
+              MS Graph: devices/{id}/memberOf → [Group1, Group2, ...]
+                      │
+                      ▼
+              Match groups → Active PolicyAssignments
+                      │
+                      ▼
+              Sort by Priority (ascending: lower = higher priority)
+                      │
+                      ▼
+              Merge settings (first-writer-wins per key, separated by scope)
+                      │
+                      ▼
+              Return: { mandatory: {...}, recommended: {...}, hash: "abc123" }
+```
+
+## 🔬 Root Cause Analysis
+
+### Why Intune Settings Catalog Fails for Chrome
+
+1. **Intune ADMX ingestion** writes to `HKLM\SOFTWARE\Microsoft\PolicyManager\providers\{GUID}\...`
+2. This relies on **GP Client Service** to mirror to `HKLM\SOFTWARE\Policies\Google\Chrome`
+3. On Entra ID–only devices, GP Client mirroring is **broken** (no `RegisterGPNotification`, no domain join)
 4. Chrome reads **only** from `HKLM\SOFTWARE\Policies\Google\Chrome` — policies never arrive
 
 ### Why Direct Registry Write Works
-- Chrome's `PolicyLoaderWin` reads from `HKLM\SOFTWARE\Policies\Google\Chrome` **unconditionally**
+
+- Chrome's `PolicyLoaderWin` reads `HKLM\SOFTWARE\Policies\Google\Chrome` **unconditionally**
 - No domain-join check gates registry policy reading
 - Chrome polls registry every 15 minutes (`kReloadInterval = base::Minutes(15)`)
-- Entra ID-only devices get `FULLY_TRUSTED` management authority — no policy filtering
+- Entra ID–only devices get `FULLY_TRUSTED` management authority — no policy filtering
 
-### Priority Resolution
-When a device is in multiple groups with conflicting policies:
-1. All assignments targeting device groups are collected
-2. Sorted by priority (ascending — lower number = higher priority)
-3. For each policy key, first writer wins
-4. Result: deterministic, predictable policy merge
+### Source Code Evidence (Chromium)
 
-## License
-Internal use only.
+- `PolicyLoaderWin::InitOnBackgroundThread()` — requires `RegisterGPNotification()` success
+- `mdm_utils.cc::IsEnrolledToDomain()` — GP registry path check fails on cloud-only devices
+- `WinGPOListProvider` — depends on Active Directory infrastructure not present on Entra-only devices
+
+## 🛡️ Security
+
+- **Entra ID authentication** for API and Admin UI
+- **Managed Identity** for Azure resource access
+- **Key Vault** for secrets (connection strings, client secrets)
+- **Entra-only SQL auth** (no SQL passwords — MCAPS compliant)
+- **Audit logging** for all policy changes and device interactions
+- **CORS** restricted to Admin UI origin
+- **Service Bus** for async device report processing (202 Accepted pattern)
+
+## 📦 Technology Stack
+
+| Component | Technology |
+|-----------|-----------|
+| API | .NET 9, Minimal API, Entity Framework Core |
+| Admin UI | Blazor Server, MudBlazor 8 |
+| Database | Azure SQL (Entra-only auth) |
+| Auth | Microsoft Identity Web, MSAL |
+| Group Resolution | Microsoft Graph SDK |
+| Messaging | Azure Service Bus |
+| Config | Azure App Configuration |
+| Secrets | Azure Key Vault |
+| Hosting | Azure App Service (B1) |
+| Client | PowerShell 5.1 (Intune Proactive Remediation) |
+
+## 🤝 Contributing
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🏷️ Keywords
+
+`chrome-policy`, `intune`, `entra-id`, `azure-ad-joined`, `admx`, `group-policy-workaround`, `chrome-enterprise`, `mdm`, `proactive-remediation`, `browser-management`, `endpoint-management`, `registry-policy`, `blazor`, `dotnet`, `azure`
+
+---
+
+**Built to solve a real-world enterprise pain point — Chrome policy delivery on modern cloud-only managed devices where ADMX-based Settings Catalog fails silently.**
