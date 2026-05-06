@@ -43,6 +43,10 @@ builder.Services.AddScoped<DeviceReportingService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddSingleton<ChromePolicyValidator>();
 
+// Service Bus - async device report processing
+builder.Services.AddSingleton<DeviceReportQueue>();
+builder.Services.AddHostedService<DeviceReportProcessor>();
+
 // OpenAPI / Swagger
 builder.Services.AddOpenApi();
 

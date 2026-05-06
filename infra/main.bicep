@@ -140,6 +140,29 @@ resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   }
 }
 
+// Service Bus Namespace (for async device report processing)
+resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
+  name: '${prefix}-sb'
+  location: location
+  tags: tags
+  sku: {
+    name: 'Basic'
+    tier: 'Basic'
+  }
+}
+
+// Service Bus Queue - Device Reports
+resource deviceReportQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: serviceBusNamespace
+  name: 'device-reports'
+  properties: {
+    maxDeliveryCount: 5
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P7D'
+    deadLetteringOnMessageExpiration: true
+  }
+}
+
 // APIM - Management API (Admin portal)
 resource apimManagementApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = {
   parent: apim
@@ -171,3 +194,4 @@ output apiUrl string = 'https://${apiAppService.properties.defaultHostName}'
 output apimGatewayUrl string = apim.properties.gatewayUrl
 output appConfigEndpoint string = appConfig.properties.endpoint
 output keyVaultUri string = keyVault.properties.vaultUri
+output serviceBusNamespace string = serviceBusNamespace.name

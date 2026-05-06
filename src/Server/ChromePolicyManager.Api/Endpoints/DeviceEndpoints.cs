@@ -9,20 +9,28 @@ public static class DeviceEndpoints
     {
         var group = app.MapGroup("/api/devices").WithTags("Devices");
 
-        // Get effective policy for a device (server-side resolution)
+        // Get effective policy for a device (server-side resolution) - synchronous
         group.MapGet("/{deviceId}/effective-policy", async (string deviceId, EffectivePolicyService service) =>
         {
             var result = await service.GetEffectivePolicyAsync(deviceId);
             return Results.Ok(result);
         }).WithName("GetEffectivePolicy");
 
-        // Device reports compliance status
+        // Device reports compliance status - async via Service Bus when available
         group.MapPost("/{deviceId}/report", async (string deviceId, [FromBody] DeviceReportRequest request,
-            DeviceReportingService service) =>
+            DeviceReportQueue queue, DeviceReportingService service) =>
         {
             if (request.DeviceId != deviceId)
                 return Results.BadRequest("DeviceId in URL must match body");
 
+            // Try async processing via Service Bus
+            var enqueued = await queue.EnqueueReportAsync(request);
+            if (enqueued)
+            {
+                return Results.Accepted(value: new { Status = "Accepted", Message = "Report queued for processing" });
+            }
+
+            // Fallback: process synchronously if Service Bus not configured
             var report = await service.SubmitReportAsync(request);
             return Results.Ok(new { ReportId = report.Id, Received = report.ReportedAt });
         }).WithName("SubmitDeviceReport");
