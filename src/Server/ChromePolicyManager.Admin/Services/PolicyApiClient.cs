@@ -85,6 +85,37 @@ public class PolicyApiClient
     {
         return await _http.GetFromJsonAsync<List<DeviceStateDto>>("/api/monitoring/errors", JsonOptions) ?? [];
     }
+
+    // === Catalog ===
+    public async Task<List<PolicyCatalogEntryDto>> GetCatalogAsync(string? category = null, string? search = null, bool? recommended = null)
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrEmpty(category)) query.Add($"category={Uri.EscapeDataString(category)}");
+        if (!string.IsNullOrEmpty(search)) query.Add($"search={Uri.EscapeDataString(search)}");
+        if (recommended.HasValue) query.Add($"recommended={recommended.Value}");
+        var qs = query.Count > 0 ? "?" + string.Join("&", query) : "";
+        return await _http.GetFromJsonAsync<List<PolicyCatalogEntryDto>>($"/api/catalog{qs}", JsonOptions) ?? [];
+    }
+
+    public async Task<List<string>> GetCatalogCategoriesAsync()
+    {
+        return await _http.GetFromJsonAsync<List<string>>("/api/catalog/categories", JsonOptions) ?? [];
+    }
+
+    public async Task<CatalogStatsDto> GetCatalogStatsAsync()
+    {
+        return await _http.GetFromJsonAsync<CatalogStatsDto>("/api/catalog/stats", JsonOptions) ?? new();
+    }
+
+    public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version)
+    {
+        using var content = new MultipartFormDataContent();
+        content.Add(new StreamContent(zipStream), "admxZip", fileName);
+        content.Add(new StringContent(version), "version");
+        var response = await _http.PostAsync("/api/catalog/import", content);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
+    }
 }
 
 // === DTOs ===
@@ -158,4 +189,43 @@ public class DeviceStateDto
     public DateTime LastContact { get; set; }
     public int PolicyKeysWritten { get; set; }
     public int PolicyKeysRemoved { get; set; }
+}
+
+public class PolicyCatalogEntryDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Description { get; set; } = "";
+    public string Category { get; set; } = "";
+    public string DataType { get; set; } = "";
+    public string RegistryKey { get; set; } = "";
+    public string RegistryValueName { get; set; } = "";
+    public bool IsRecommended { get; set; }
+    public string SupportedOn { get; set; } = "";
+    public string? EnumOptions { get; set; }
+    public string PolicyClass { get; set; } = "";
+    public string TemplateVersion { get; set; } = "";
+    public DateTime ImportedAt { get; set; }
+}
+
+public class CatalogStatsDto
+{
+    public int TotalEntries { get; set; }
+    public int MandatoryPolicies { get; set; }
+    public int RecommendedPolicies { get; set; }
+    public int Categories { get; set; }
+    public string TemplateVersion { get; set; } = "";
+    public DateTime? LastImport { get; set; }
+}
+
+public class CatalogImportResultDto
+{
+    public string Message { get; set; } = "";
+    public string TemplateVersion { get; set; } = "";
+    public int TotalParsed { get; set; }
+    public int Mandatory { get; set; }
+    public int Recommended { get; set; }
+    public int Categories { get; set; }
+    public List<string> Warnings { get; set; } = [];
 }

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Microsoft.Graph;
@@ -42,6 +43,7 @@ builder.Services.AddScoped<EffectivePolicyService>();
 builder.Services.AddScoped<DeviceReportingService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 builder.Services.AddSingleton<ChromePolicyValidator>();
+builder.Services.AddSingleton<AdmxParserService>();
 
 // Service Bus - async device report processing
 builder.Services.AddSingleton<DeviceReportQueue>();
@@ -49,6 +51,13 @@ builder.Services.AddHostedService<DeviceReportProcessor>();
 
 // OpenAPI / Swagger
 builder.Services.AddOpenApi();
+
+// JSON serialization - handle EF Core circular references
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
 
 // CORS for management UI
 builder.Services.AddCors(options =>
@@ -82,6 +91,7 @@ app.MapPolicyEndpoints();
 app.MapAssignmentEndpoints();
 app.MapDeviceEndpoints();
 app.MapMonitoringEndpoints();
+app.MapCatalogEndpoints();
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))

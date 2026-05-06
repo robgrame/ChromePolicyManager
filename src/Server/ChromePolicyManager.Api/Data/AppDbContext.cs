@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<DeviceReport> DeviceReports => Set<DeviceReport>();
     public DbSet<DeviceState> DeviceStates => Set<DeviceState>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<PolicyCatalogEntry> PolicyCatalog => Set<PolicyCatalogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +55,14 @@ public class AppDbContext : DbContext
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Timestamp);
             e.HasIndex(x => new { x.EntityType, x.EntityId });
+        });
+
+        modelBuilder.Entity<PolicyCatalogEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.Name, x.IsRecommended }).IsUnique();
+            e.HasIndex(x => x.Category);
+            e.HasIndex(x => x.DataType);
         });
     }
 }
