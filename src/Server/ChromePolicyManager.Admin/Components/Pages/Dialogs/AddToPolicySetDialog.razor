@@ -1,0 +1,99 @@
+@using ChromePolicyManager.Admin.Services
+@using System.Text.Json
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add "@Entry.Name" to PolicySet</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            Type: @Entry.DataType | Scope: @(Entry.IsRecommended ? "Recommended" : "Mandatory")
+        </MudAlert>
+        <MudSelect @bind-Value="_selectedPolicySet" Label="Target PolicySet" Variant="Variant.Outlined" Class="mb-3">
+            @foreach (var ps in PolicySets)
+            {
+                <MudSelectItem Value="@ps">@ps.Name</MudSelectItem>
+            }
+        </MudSelect>
+
+        @switch (Entry.DataType)
+        {
+            case "Boolean":
+                <MudSwitch @bind-Value="_boolValue" Label="@($"Enable {Entry.Name}")" Color="Color.Primary" />
+                break;
+            case "Integer":
+                <MudNumericField @bind-Value="_intValue" Label="Value" Variant="Variant.Outlined" />
+                break;
+            case "String":
+                <MudTextField @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined" />
+                break;
+            case "Enum":
+                <MudSelect @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined">
+                    @foreach (var opt in ParseEnumOptions(Entry.EnumOptions ?? "[]"))
+                    {
+                        <MudSelectItem Value="@opt.Value">@opt.Display (@opt.Value)</MudSelectItem>
+                    }
+                </MudSelect>
+                break;
+            case "List":
+                <MudTextField @bind-Value="_stringValue" Label="Values (one per line)" Lines="4" Variant="Variant.Outlined"
+                              HelperText="Enter list items separated by newlines" />
+                break;
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_selectedPolicySet is null)"
+                   OnClick="Submit">
+            Add Policy
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public PolicyCatalogEntryDto Entry { get; set; } = default!;
+    [Parameter] public List<PolicySetDto> PolicySets { get; set; } = [];
+
+    private PolicySetDto? _selectedPolicySet;
+    private bool _boolValue = true;
+    private int _intValue;
+    private string _stringValue = "";
+
+    protected override void OnInitialized()
+    {
+        _selectedPolicySet = PolicySets.FirstOrDefault();
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        object value = Entry.DataType switch
+        {
+            "Boolean" => _boolValue,
+            "Integer" => _intValue,
+            _ => _stringValue
+        };
+
+        MudDialog.Close(DialogResult.Ok(new AddToPolicySetResult
+        {
+            PolicySet = _selectedPolicySet!,
+            Value = value
+        }));
+    }
+
+    private List<(string Value, string Display)> ParseEnumOptions(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.EnumerateArray()
+                .Select(e => (
+                    Value: e.GetProperty("value").ToString(),
+                    Display: e.TryGetProperty("displayName", out var d) ? d.GetString() ?? "" : ""))
+                .ToList();
+        }
+        catch { return []; }
+    }
+}

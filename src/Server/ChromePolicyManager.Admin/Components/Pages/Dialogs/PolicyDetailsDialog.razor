@@ -1,0 +1,81 @@
+@using ChromePolicyManager.Admin.Services
+@using System.Text.Json
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Entry.Name</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle1" Color="Color.Primary">@Entry.DisplayName</MudText>
+            </MudItem>
+            <MudItem xs="12">
+                <MudText Typo="Typo.body2">@Entry.Description</MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Category</MudText>
+                <MudText>@Entry.Category</MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Data Type</MudText>
+                <MudText>@Entry.DataType</MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Registry Key</MudText>
+                <MudText Typo="Typo.body2"><code>@Entry.RegistryKey</code></MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Value Name</MudText>
+                <MudText Typo="Typo.body2"><code>@Entry.RegistryValueName</code></MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Supported On</MudText>
+                <MudText>@Entry.SupportedOn</MudText>
+            </MudItem>
+            <MudItem xs="6">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Class</MudText>
+                <MudText>@Entry.PolicyClass</MudText>
+            </MudItem>
+            @if (!string.IsNullOrEmpty(Entry.EnumOptions))
+            {
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Enum Options</MudText>
+                    <MudSimpleTable Dense="true" Striped="true" Class="mt-1">
+                        <thead><tr><th>Value</th><th>Display Name</th></tr></thead>
+                        <tbody>
+                            @foreach (var opt in ParseEnumOptions(Entry.EnumOptions))
+                            {
+                                <tr><td>@opt.Value</td><td>@opt.Display</td></tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudItem>
+            }
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public PolicyCatalogEntryDto Entry { get; set; } = default!;
+
+    private void Cancel() => MudDialog.Close();
+
+    private List<(string Value, string Display)> ParseEnumOptions(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.EnumerateArray()
+                .Select(e => (
+                    Value: e.GetProperty("value").ToString(),
+                    Display: e.TryGetProperty("displayName", out var d) ? d.GetString() ?? "" : ""))
+                .ToList();
+        }
+        catch { return []; }
+    }
+}

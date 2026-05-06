@@ -1,7 +1,9 @@
 @page "/catalog"
 @rendermode InteractiveServer
 @using ChromePolicyManager.Admin.Services
+@using ChromePolicyManager.Admin.Components.Pages.Dialogs
 @inject PolicyApiClient Api
+@inject IDialogService DialogService
 
 <PageTitle>Policy Catalog - Chrome Policy Manager</PageTitle>
 
@@ -237,127 +239,6 @@ else if (_stats is null && !_loading)
     </MudTable>
 }
 
-@* Details dialog *@
-<MudDialog Visible="_showDetails" VisibleChanged="v => _showDetails = v" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
-    <TitleContent>
-        <MudText Typo="Typo.h6">@_detailEntry?.Name</MudText>
-    </TitleContent>
-    <DialogContent>
-        @if (_detailEntry is not null)
-        {
-            <MudGrid>
-                <MudItem xs="12">
-                    <MudText Typo="Typo.subtitle1" Color="Color.Primary">@_detailEntry.DisplayName</MudText>
-                </MudItem>
-                <MudItem xs="12">
-                    <MudText Typo="Typo.body2">@_detailEntry.Description</MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Category</MudText>
-                    <MudText>@_detailEntry.Category</MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Data Type</MudText>
-                    <MudText>@_detailEntry.DataType</MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Registry Key</MudText>
-                    <MudText Typo="Typo.body2"><code>@_detailEntry.RegistryKey</code></MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Value Name</MudText>
-                    <MudText Typo="Typo.body2"><code>@_detailEntry.RegistryValueName</code></MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Supported On</MudText>
-                    <MudText>@_detailEntry.SupportedOn</MudText>
-                </MudItem>
-                <MudItem xs="6">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Class</MudText>
-                    <MudText>@_detailEntry.PolicyClass</MudText>
-                </MudItem>
-                @if (!string.IsNullOrEmpty(_detailEntry.EnumOptions))
-                {
-                    <MudItem xs="12">
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Enum Options</MudText>
-                        <MudSimpleTable Dense="true" Striped="true" Class="mt-1">
-                            <thead><tr><th>Value</th><th>Display Name</th></tr></thead>
-                            <tbody>
-                                @foreach (var opt in ParseEnumOptions(_detailEntry.EnumOptions))
-                                {
-                                    <tr><td>@opt.Value</td><td>@opt.Display</td></tr>
-                                }
-                            </tbody>
-                        </MudSimpleTable>
-                    </MudItem>
-                }
-            </MudGrid>
-        }
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="() => _showDetails = false">Close</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => AddToPolicySet(_detailEntry!)">
-            Add to PolicySet
-        </MudButton>
-    </DialogActions>
-</MudDialog>
-
-@* Add to PolicySet dialog *@
-<MudDialog Visible="_showAddDialog" VisibleChanged="v => _showAddDialog = v" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
-    <TitleContent>
-        <MudText Typo="Typo.h6">Add "@_addEntry?.Name" to PolicySet</MudText>
-    </TitleContent>
-    <DialogContent>
-        @if (_addEntry is not null)
-        {
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                Type: @_addEntry.DataType | Scope: @(_addEntry.IsRecommended ? "Recommended" : "Mandatory")
-            </MudAlert>
-            <MudSelect @bind-Value="_addTargetPolicySet" Label="Target PolicySet" Variant="Variant.Outlined" Class="mb-3">
-                @foreach (var ps in _policySets)
-                {
-                    <MudSelectItem Value="@ps">@ps.Name</MudSelectItem>
-                }
-            </MudSelect>
-
-            @switch (_addEntry.DataType)
-            {
-                case "Boolean":
-                    <MudSwitch @bind-Value="_addBoolValue" Label="@($"Enable {_addEntry.Name}")" Color="Color.Primary" />
-                    break;
-                case "Integer":
-                    <MudNumericField @bind-Value="_addIntValue" Label="Value" Variant="Variant.Outlined" />
-                    break;
-                case "String":
-                    <MudTextField @bind-Value="_addStringValue" Label="Value" Variant="Variant.Outlined" />
-                    break;
-                case "Enum":
-                    <MudSelect @bind-Value="_addStringValue" Label="Value" Variant="Variant.Outlined">
-                        @foreach (var opt in ParseEnumOptions(_addEntry.EnumOptions ?? "[]"))
-                        {
-                            <MudSelectItem Value="@opt.Value">@opt.Display (@opt.Value)</MudSelectItem>
-                        }
-                    </MudSelect>
-                    break;
-                case "List":
-                    <MudTextField @bind-Value="_addStringValue" Label="Values (one per line)" Lines="4" Variant="Variant.Outlined"
-                                  HelperText="Enter list items separated by newlines" />
-                    break;
-            }
-        }
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="() => _showAddDialog = false">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_addTargetPolicySet is null)"
-                   OnClick="ConfirmAddToPolicySet">
-            Add Policy
-        </MudButton>
-    </DialogActions>
-</MudDialog>
-
-@* Snackbar for feedback *@
-<MudSnackbarProvider />
-
 @code {
     private List<PolicyCatalogEntryDto> _entries = [];
     private List<PolicyCatalogEntryDto> _filteredEntries = [];
@@ -376,18 +257,6 @@ else if (_stats is null && !_loading)
     private bool _importing;
     private CatalogImportResultDto? _importResult;
     private string? _importError;
-
-    // Details dialog
-    private bool _showDetails;
-    private PolicyCatalogEntryDto? _detailEntry;
-
-    // Add to PolicySet dialog
-    private bool _showAddDialog;
-    private PolicyCatalogEntryDto? _addEntry;
-    private PolicySetDto? _addTargetPolicySet;
-    private bool _addBoolValue = true;
-    private int _addIntValue;
-    private string _addStringValue = "";
 
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
 
@@ -524,50 +393,40 @@ else if (_stats is null && !_loading)
             _filteredEntries = _filteredEntries.Where(e => e.IsRecommended).ToList();
     }
 
-    private void ShowDetails(PolicyCatalogEntryDto entry)
+    private async Task ShowDetails(PolicyCatalogEntryDto entry)
     {
-        _detailEntry = entry;
-        _showDetails = true;
-        StateHasChanged();
-    }
-
-    private void AddToPolicySet(PolicyCatalogEntryDto entry)
-    {
-        _addEntry = entry;
-        _addBoolValue = true;
-        _addIntValue = 0;
-        _addStringValue = "";
-        _addTargetPolicySet = _policySets.FirstOrDefault();
-        _showAddDialog = true;
-        _showDetails = false;
-        StateHasChanged();
-    }
-
-    private async Task ConfirmAddToPolicySet()
-    {
-        if (_addEntry is null || _addTargetPolicySet is null) return;
-
-        try
+        var parameters = new DialogParameters<PolicyDetailsDialog>
         {
-            // Build the policy value
-            var value = _addEntry.DataType switch
+            { x => x.Entry, entry }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<PolicyDetailsDialog>(entry.Name, parameters, options);
+    }
+
+    private async Task AddToPolicySet(PolicyCatalogEntryDto entry)
+    {
+        var parameters = new DialogParameters<AddToPolicySetDialog>
+        {
+            { x => x.Entry, entry },
+            { x => x.PolicySets, _policySets }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<AddToPolicySetDialog>($"Add {entry.Name}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled && result.Data is AddToPolicySetResult addResult)
+        {
+            var value = entry.DataType switch
             {
-                "Boolean" => _addBoolValue ? "true" : "false",
-                "Integer" => _addIntValue.ToString(),
-                "List" => System.Text.Json.JsonSerializer.Serialize(_addStringValue.Split('\n', StringSplitOptions.RemoveEmptyEntries)),
-                _ => $"\"{_addStringValue}\""
+                "Boolean" => addResult.Value is bool b ? (b ? "true" : "false") : addResult.Value.ToString()!,
+                "Integer" => addResult.Value.ToString()!,
+                "List" => addResult.Value is string s
+                    ? System.Text.Json.JsonSerializer.Serialize(s.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    : addResult.Value.ToString()!,
+                _ => $"\"{addResult.Value}\""
             };
 
-            // For enum, try to parse as int
-            if (_addEntry.DataType == "Enum" && int.TryParse(_addStringValue, out _))
-                value = _addStringValue;
-
-            Snackbar.Add($"Added {_addEntry.Name} = {value} to \"{_addTargetPolicySet.Name}\" (include in next version)", Severity.Success);
-            _showAddDialog = false;
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Added {entry.Name} = {value} to \"{addResult.PolicySet.Name}\" (include in next version)", Severity.Success);
         }
     }
 
@@ -583,23 +442,4 @@ else if (_stats is null && !_loading)
         "List" => Color.Tertiary,
         _ => Color.Default
     };
-
-    private record EnumOption(string Value, string Display);
-
-    private static List<EnumOption> ParseEnumOptions(string json)
-    {
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            return doc.RootElement.EnumerateArray().Select(e =>
-            {
-                var val = e.GetProperty("value").ValueKind == System.Text.Json.JsonValueKind.Number
-                    ? e.GetProperty("value").GetInt32().ToString()
-                    : e.GetProperty("value").GetString() ?? "";
-                var display = e.GetProperty("displayName").GetString() ?? val;
-                return new EnumOption(val, display);
-            }).ToList();
-        }
-        catch { return []; }
-    }
 }

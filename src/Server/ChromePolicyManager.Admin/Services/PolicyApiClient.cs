@@ -241,3 +241,9 @@ public class CatalogImportResultDto
     public int Updated { get; set; }
     public List<string> Warnings { get; set; } = [];
 }
+
+public class AddToPolicySetResult
+{
+    public PolicySetDto PolicySet { get; set; } = default!;
+    public object Value { get; set; } = default!;
+}
