@@ -3,9 +3,11 @@
 ## Binaries & build output
 bin/
 obj/
+publish/
 *.dll
 *.exe
 *.pdb
+*.zip
 
 ## IDE
 .vs/
