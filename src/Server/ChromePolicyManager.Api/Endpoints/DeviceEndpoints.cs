@@ -9,10 +9,23 @@ public static class DeviceEndpoints
     {
         var group = app.MapGroup("/api/devices").WithTags("Devices");
 
-        // Get effective policy for a device (server-side resolution) - synchronous
-        group.MapGet("/{deviceId}/effective-policy", async (string deviceId, EffectivePolicyService service) =>
+        // Get effective policy for a device (server-side resolution)
+        // Supports ETag/If-None-Match for bandwidth optimization at scale
+        group.MapGet("/{deviceId}/effective-policy", async (string deviceId, HttpContext httpContext, EffectivePolicyService service) =>
         {
             var result = await service.GetEffectivePolicyAsync(deviceId);
+            var etag = $"\"{result.Hash}\"";
+
+            // Check If-None-Match header — if hash matches, policy hasn't changed
+            var ifNoneMatch = httpContext.Request.Headers.IfNoneMatch.FirstOrDefault();
+            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch == etag)
+            {
+                httpContext.Response.Headers.ETag = etag;
+                return Results.StatusCode(304);
+            }
+
+            httpContext.Response.Headers.ETag = etag;
+            httpContext.Response.Headers.CacheControl = "no-cache"; // must revalidate
             return Results.Ok(result);
         }).WithName("GetEffectivePolicy");
 

@@ -165,13 +165,38 @@ try {
         }
     }
     
-    # Call API to get effective policy
+    # Call API to get effective policy (with ETag for bandwidth optimization)
     $headers = @{
         Authorization = "Bearer $token"
         "Content-Type" = "application/json"
     }
     
-    $effectivePolicy = Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET
+    # If we have a local hash, send it as ETag — API returns 304 if nothing changed
+    $localHash = Get-CurrentPolicyHash
+    if ($localHash) {
+        $headers["If-None-Match"] = "`"$localHash`""
+    }
+    
+    try {
+        $response = Invoke-WebRequest -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -UseBasicParsing
+        
+        if ($response.StatusCode -eq 304) {
+            # Policy hasn't changed — device is compliant
+            Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
+            Write-Output "Compliant (Hash: $localHash, cached)"
+            exit 0
+        }
+        
+        $effectivePolicy = $response.Content | ConvertFrom-Json
+    }
+    catch {
+        if ($_.Exception.Response.StatusCode.value__ -eq 304) {
+            Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
+            Write-Output "Compliant (Hash: $localHash, cached)"
+            exit 0
+        }
+        throw
+    }
     
     if (-not $effectivePolicy -or (-not $effectivePolicy.mandatoryPolicies -and -not $effectivePolicy.recommendedPolicies)) {
         Write-Log "No policies assigned to this device"
@@ -181,7 +206,6 @@ try {
     
     # Compare server hash with local hash
     $serverHash = $effectivePolicy.hash
-    $localHash = Get-CurrentPolicyHash
     
     if ($serverHash -eq $localHash) {
         Write-Log "Policy hash matches - device is compliant (Hash: $serverHash)"
