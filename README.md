@@ -33,12 +33,15 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 │  └──────────┘          │                                         │
 │                   ┌────┴────┐                                    │
 │                   │ SQL DB  │  ← PolicySets, Versions,           │
-│                   │         │    Assignments, DeviceState         │
+│                   │  (S2)   │    Assignments, DeviceState         │
 │                   └────┬────┘                                    │
 │                        │                                         │
-│                   ┌────┴────┐                                    │
-│                   │ MS Graph│  ← Group membership resolution     │
-│                   └─────────┘                                    │
+│              ┌─────────┼─────────┐                               │
+│              │         │         │                               │
+│         ┌────┴────┐ ┌──┴───┐ ┌──┴──────────┐                   │
+│         │ MS Graph│ │ Svc  │ │ Graph Change │                   │
+│         │ (delta) │ │ Bus  │ │ Webhooks     │                   │
+│         └─────────┘ └──────┘ └─────────────┘                   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -211,20 +214,90 @@ Client Device → API: "What policies apply to me?" (GET /devices/{id}/effective
 - **CORS** restricted to Admin UI origin
 - **Service Bus** for async device report processing (202 Accepted pattern)
 
+## 📈 Scaling to 100k+ Devices
+
+The solution is designed to handle large-scale enterprise environments (100,000+ devices) with minimal infrastructure cost. Three key optimizations make this possible:
+
+### 1. ETag / 304 Not Modified
+
+The `GET /devices/{id}/effective-policy` endpoint returns an `ETag` header containing the policy hash. On subsequent requests, the client sends `If-None-Match` with its cached hash:
+
+```
+Client → API: GET /effective-policy  (If-None-Match: "abc123")
+API → Client: 304 Not Modified       ← No body, minimal compute
+
+Only when policy actually changes:
+Client → API: GET /effective-policy  (If-None-Match: "abc123")
+API → Client: 200 OK + full payload  (ETag: "def456")
+```
+
+**Impact:** At 100k devices/hour with ~90% steady state → only ~10k full responses/hour carry a payload.
+
+### 2. Graph Change Notifications (Webhooks)
+
+Instead of calling Microsoft Graph for every device check-in (which would hit throttling limits at scale), the API subscribes to **real-time webhook notifications** for group membership changes:
+
+```
+┌─────────────┐     Webhook: "Group X changed"     ┌─────────────┐
+│ Microsoft   │ ──────────────────────────────────▶ │  CPM API    │
+│ Graph       │                                     │  (marks     │
+└─────────────┘                                     │  group as   │
+                                                    │  dirty)     │
+                                                    └──────┬──────┘
+                                                           │
+Device check-in:                                           ▼
+  - Device in Group X → Graph call (real-time, fresh data)
+  - Device in Group Y (unchanged) → use cached membership
+```
+
+**Implementation:**
+- `GroupChangeNotificationService` (BackgroundService) maintains subscriptions for all groups used in policy assignments
+- Subscriptions auto-renew before the 4230-minute Graph limit (~3 days)
+- `/api/webhooks/group-change` receives notifications and marks affected groups
+- `WebhookEndpoints.HasGroupChanged()` allows the effective policy resolver to skip Graph calls for unchanged groups
+
+**Impact:** Reduces Graph API calls from **100,000/hour** to **~50-100/hour** (only devices in groups that actually changed), while maintaining **zero-latency reactivity** — policy changes propagate within minutes, not hours like Intune.
+
+### 3. Azure SQL S2 (50 DTU)
+
+Upgraded from Basic (5 DTU) to Standard S2 to handle sustained write throughput:
+- 100k device reports/hour = ~28 writes/sec sustained
+- S2 provides 50 DTU → comfortable headroom for reads + writes + indexes
+
+### Scaling Summary
+
+| Metric | Without optimizations | With optimizations |
+|--------|----------------------|-------------------|
+| Graph API calls/hour | 100,000 (throttled) | 50-100 |
+| Full policy responses/hour | 100,000 | ~10,000 |
+| Network bandwidth/hour | ~500 MB | ~50 MB |
+| SQL write pressure | 100k full reports | 100k lightweight + 10k full |
+| Reactivity | N/A (was polling) | **Real-time** (webhook push) |
+
+### Recommended SKUs for 100k+ Devices
+
+| Component | SKU | Monthly Cost (est.) |
+|-----------|-----|-------------------|
+| App Service | S2 or P1v3 | €70-140 |
+| Azure SQL | S2 (50 DTU) | €60-150 |
+| Service Bus | Standard | €10 |
+| Total | | **~€150-300/month** |
+
 ## 📦 Technology Stack
 
 | Component | Technology |
 |-----------|-----------|
 | API | .NET 9, Minimal API, Entity Framework Core |
 | Admin UI | Blazor Server, MudBlazor 8 |
-| Database | Azure SQL (Entra-only auth) |
-| Auth | Microsoft Identity Web, MSAL |
-| Group Resolution | Microsoft Graph SDK |
-| Messaging | Azure Service Bus |
-| Config | Azure App Configuration |
+| Database | Azure SQL S2, 50 DTU (Entra-only auth) |
+| Auth | Microsoft Identity Web, MSAL, Device Certificates |
+| Group Resolution | Microsoft Graph SDK + Change Notifications |
+| Messaging | Azure Service Bus (async device reports) |
+| Config | Azure App Configuration (Standard) |
 | Secrets | Azure Key Vault |
-| Hosting | Azure App Service (B1) |
+| Hosting | Azure App Service (B1 → S2 at scale) |
 | Client | PowerShell 5.1 (Intune Proactive Remediation) |
+| Policy Catalog | Chrome ADMX/ADML parser (700+ policies) |
 
 ## 🤝 Contributing
 
