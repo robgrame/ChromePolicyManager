@@ -21,11 +21,11 @@
 
 $ErrorActionPreference = "Stop"
 
-# Configuration - these should be set during deployment
-$ApiBaseUrl = "https://your-chrome-policy-api.azurewebsites.net"
-$TenantId = "YOUR_TENANT_ID"
-$ClientId = "YOUR_CLIENT_APP_ID"  # App registration for device auth
-$Scope = "api://chrome-policy-manager/.default"
+# Configuration
+$ApiBaseUrl = "https://cpm-dev-api.azurewebsites.net"
+$TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
+$ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"  # App registration for device auth
+$Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
 
 # Paths
 $ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"

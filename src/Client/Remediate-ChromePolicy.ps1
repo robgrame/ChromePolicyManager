@@ -26,10 +26,10 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$ApiBaseUrl = "https://your-chrome-policy-api.azurewebsites.net"
-$TenantId = "YOUR_TENANT_ID"
-$ClientId = "YOUR_CLIENT_APP_ID"
-$Scope = "api://chrome-policy-manager/.default"
+$ApiBaseUrl = "https://cpm-dev-api.azurewebsites.net"
+$TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
+$ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"
+$Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
 
 # Registry paths
 $ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
