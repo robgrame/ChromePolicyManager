@@ -49,6 +49,9 @@ builder.Services.AddSingleton<AdmxParserService>();
 builder.Services.AddSingleton<DeviceReportQueue>();
 builder.Services.AddHostedService<DeviceReportProcessor>();
 
+// Graph change notifications - webhook subscription management
+builder.Services.AddHostedService<GroupChangeNotificationService>();
+
 // OpenAPI / Swagger
 builder.Services.AddOpenApi();
 
@@ -98,6 +101,7 @@ app.MapAssignmentEndpoints();
 app.MapDeviceEndpoints();
 app.MapMonitoringEndpoints();
 app.MapCatalogEndpoints();
+app.MapWebhookEndpoints();
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))
