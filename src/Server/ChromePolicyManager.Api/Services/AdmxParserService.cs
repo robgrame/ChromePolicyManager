@@ -75,7 +75,9 @@ public class AdmxParserService
 
         // Strip _recommended suffix for clean category name
         var cleanCategory = categoryRef.Replace("_recommended", "");
-        var categoryName = categories.GetValueOrDefault(cleanCategory, cleanCategory);
+        var categoryDisplayName = categories.GetValueOrDefault(cleanCategory, cleanCategory);
+        // Resolve the category display name through ADML string table
+        var categoryName = ResolveStringRef(categoryDisplayName, strings) ?? categoryDisplayName;
 
         // Get display name and description from ADML strings
         var displayName = ResolveStringRef(policy.Attribute("displayName")?.Value, strings)

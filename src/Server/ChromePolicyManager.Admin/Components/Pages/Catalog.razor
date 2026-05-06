@@ -238,7 +238,7 @@ else if (_stats is null && !_loading)
 }
 
 @* Details dialog *@
-<MudDialog @bind-Visible="_showDetails" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
+<MudDialog Visible="_showDetails" VisibleChanged="v => _showDetails = v" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
     <TitleContent>
         <MudText Typo="Typo.h6">@_detailEntry?.Name</MudText>
     </TitleContent>
@@ -303,7 +303,7 @@ else if (_stats is null && !_loading)
 </MudDialog>
 
 @* Add to PolicySet dialog *@
-<MudDialog @bind-Visible="_showAddDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+<MudDialog Visible="_showAddDialog" VisibleChanged="v => _showAddDialog = v" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
     <TitleContent>
         <MudText Typo="Typo.h6">Add "@_addEntry?.Name" to PolicySet</MudText>
     </TitleContent>
@@ -528,6 +528,7 @@ else if (_stats is null && !_loading)
     {
         _detailEntry = entry;
         _showDetails = true;
+        StateHasChanged();
     }
 
     private void AddToPolicySet(PolicyCatalogEntryDto entry)
@@ -539,6 +540,7 @@ else if (_stats is null && !_loading)
         _addTargetPolicySet = _policySets.FirstOrDefault();
         _showAddDialog = true;
         _showDetails = false;
+        StateHasChanged();
     }
 
     private async Task ConfirmAddToPolicySet()
