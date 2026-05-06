@@ -1,0 +1,141 @@
+@page "/policies"
+@rendermode InteractiveServer
+@inject PolicyApiClient Api
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Policies - Chrome Policy Manager</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Policy Sets</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@OpenCreateDialog">New Policy Set</MudButton>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid>
+        @foreach (var policy in _policies)
+        {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@policy.Name</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@policy.Description</MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" 
+                                           OnClick="@(() => OpenVersionDialog(policy))" Title="Add Version" />
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.body2" Class="mb-2">
+                            <strong>@policy.Versions.Count</strong> version(s)
+                        </MudText>
+                        @if (policy.Versions.Any())
+                        {
+                            <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                                <thead>
+                                    <tr><th>Version</th><th>Status</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var v in policy.Versions.OrderByDescending(x => x.CreatedAt))
+                                    {
+                                        <tr>
+                                            <td>@v.Version</td>
+                                            <td>
+                                                <MudChip T="string" Size="Size.Small" Color="@GetVersionColor(v.Status)">
+                                                    @v.Status
+                                                </MudChip>
+                                            </td>
+                                            <td>
+                                                @if (v.Status == PolicyVersionStatus.Draft)
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Publish" Size="Size.Small"
+                                                                   Color="Color.Success" OnClick="@(() => PromoteVersion(v))"
+                                                                   Title="Promote to Active" />
+                                                }
+                                                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                               OnClick="@(() => ViewSettings(v))" Title="View Settings" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">No versions yet</MudAlert>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<PolicySetDto> _policies = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadPolicies();
+
+    private async Task LoadPolicies()
+    {
+        _loading = true;
+        try { _policies = await Api.GetPoliciesAsync(); }
+        catch (Exception ex) { Snackbar.Add($"Failed to load policies: {ex.Message}", Severity.Error); }
+        finally { _loading = false; }
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<CreatePolicyDialog>("New Policy Set",
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadPolicies();
+    }
+
+    private async Task OpenVersionDialog(PolicySetDto policy)
+    {
+        var parameters = new DialogParameters { ["PolicySet"] = policy };
+        var dialog = await DialogService.ShowAsync<CreateVersionDialog>($"New Version - {policy.Name}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadPolicies();
+    }
+
+    private async Task PromoteVersion(PolicySetVersionDto version)
+    {
+        try
+        {
+            await Api.PromoteVersionAsync(version.Id);
+            Snackbar.Add($"Version {version.Version} promoted to Active!", Severity.Success);
+            await LoadPolicies();
+        }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task ViewSettings(PolicySetVersionDto version)
+    {
+        var parameters = new DialogParameters { ["Version"] = version };
+        await DialogService.ShowAsync<ViewSettingsDialog>($"Settings - v{version.Version}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
+    private Color GetVersionColor(PolicyVersionStatus status) => status switch
+    {
+        PolicyVersionStatus.Active => Color.Success,
+        PolicyVersionStatus.Draft => Color.Info,
+        PolicyVersionStatus.Archived => Color.Default,
+        _ => Color.Default
+    };
+}

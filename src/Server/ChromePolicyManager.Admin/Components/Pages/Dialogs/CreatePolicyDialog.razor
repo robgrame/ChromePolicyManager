@@ -1,0 +1,42 @@
+@inject PolicyApiClient Api
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Create Policy Set</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" Variant="Variant.Outlined"
+                      Placeholder="e.g. Chrome Security Baseline" Class="mb-3" />
+        <MudTextField @bind-Value="_description" Label="Description" Variant="Variant.Outlined"
+                      Placeholder="Description of this policy set" Lines="3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" 
+                   Disabled="@string.IsNullOrWhiteSpace(_name)">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private string _name = "";
+    private string _description = "";
+
+    private async Task Submit()
+    {
+        try
+        {
+            await Api.CreatePolicySetAsync(_name, _description);
+            Snackbar.Add($"Policy Set '{_name}' created!", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,72 @@
+@inject PolicyApiClient Api
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">New Version - @PolicySet?.Name</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_version" Label="Version" Required="true" Variant="Variant.Outlined"
+                      Placeholder="e.g. 1.0.0" Class="mb-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Chrome Policy Settings (JSON)</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+            Enter Chrome policy keys and values. Example: {"SafeBrowsingProtectionLevel": 2, "URLBlocklist": ["*://malware.test/*"]}
+        </MudText>
+        <MudTextField @bind-Value="_settingsJson" Label="Settings JSON" Variant="Variant.Outlined"
+                      Lines="12" Placeholder='{"PolicyName": value, ...}' Style="font-family: monospace;" />
+        
+        @if (_warnings.Any())
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">
+                <MudText Typo="Typo.caption">Warnings: @string.Join("; ", _warnings)</MudText>
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_version) || string.IsNullOrWhiteSpace(_settingsJson))">
+            Create Version
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public PolicySetDto? PolicySet { get; set; }
+
+    private string _version = "";
+    private string _settingsJson = "";
+    private List<string> _warnings = [];
+
+    protected override void OnInitialized()
+    {
+        if (PolicySet?.Versions.Any() == true)
+        {
+            var latest = PolicySet.Versions.OrderByDescending(v => v.CreatedAt).First();
+            _settingsJson = latest.SettingsJson;
+            // Suggest next version
+            var parts = latest.Version.Split('.');
+            if (parts.Length == 3 && int.TryParse(parts[2], out var patch))
+                _version = $"{parts[0]}.{parts[1]}.{patch + 1}";
+        }
+    }
+
+    private async Task Submit()
+    {
+        try
+        {
+            var result = await Api.CreateVersionAsync(PolicySet!.Id, _version, _settingsJson);
+            _warnings = result.Validation?.Warnings ?? [];
+            
+            Snackbar.Add($"Version {_version} created (Status: Draft). Promote to activate.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

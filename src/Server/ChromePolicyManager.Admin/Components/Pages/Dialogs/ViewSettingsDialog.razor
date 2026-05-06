@@ -1,0 +1,47 @@
+@using System.Text.Json
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Policy Settings - v@Version?.Version</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudStack Row="true" Spacing="3">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor()">@Version?.Status</MudChip>
+                <MudText Typo="Typo.caption">Hash: @Version?.Hash</MudText>
+            </MudStack>
+            <MudDivider />
+            <MudText Typo="Typo.subtitle2">Chrome Policy Keys:</MudText>
+            <MudPaper Class="pa-3" Elevation="0" Style="background:#f5f5f5; font-family:monospace; font-size:0.85rem; white-space:pre-wrap; max-height:400px; overflow-y:auto;">
+                @FormatJson(Version?.SettingsJson ?? "{}")
+            </MudPaper>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Variant="Variant.Filled">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public PolicySetVersionDto? Version { get; set; }
+
+    private void Close() => MudDialog.Close();
+
+    private string FormatJson(string json)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return json; }
+    }
+
+    private Color GetStatusColor() => Version?.Status switch
+    {
+        PolicyVersionStatus.Active => Color.Success,
+        PolicyVersionStatus.Draft => Color.Info,
+        _ => Color.Default
+    };
+}

@@ -1,0 +1,93 @@
+@page "/assignments"
+@rendermode InteractiveServer
+@inject PolicyApiClient Api
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Assignments - Chrome Policy Manager</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Policy Assignments</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@OpenCreateDialog">New Assignment</MudButton>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="@_assignments" Hover="true" Striped="true" Elevation="1" Dense="true">
+        <HeaderContent>
+            <MudTh>Group</MudTh>
+            <MudTh>Scope</MudTh>
+            <MudTh>Priority</MudTh>
+            <MudTh>Policy Version</MudTh>
+            <MudTh>Enabled</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Small" />
+                    <MudText>@context.GroupName</MudText>
+                </MudStack>
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@(context.Scope == 0 ? Color.Error : Color.Info)">
+                    @(context.Scope == 0 ? "Mandatory" : "Recommended")
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Priority</MudChip>
+            </MudTd>
+            <MudTd><MudText Typo="Typo.caption">@context.PolicySetVersionId.ToString()[..8]…</MudText></MudTd>
+            <MudTd>
+                <MudIcon Icon="@(context.Enabled ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
+                         Color="@(context.Enabled ? Color.Success : Color.Error)" Size="Size.Small" />
+            </MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => DeleteAssignment(context))" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private List<AssignmentDto> _assignments = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAssignments();
+
+    private async Task LoadAssignments()
+    {
+        _loading = true;
+        try { _assignments = await Api.GetAssignmentsAsync(); }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        finally { _loading = false; }
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<CreateAssignmentDialog>("New Assignment",
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadAssignments();
+    }
+
+    private async Task DeleteAssignment(AssignmentDto assignment)
+    {
+        var confirm = await DialogService.ShowMessageBox("Delete Assignment",
+            $"Remove assignment to {assignment.GroupName}?", yesText: "Delete", cancelText: "Cancel");
+        if (confirm == true)
+        {
+            await Api.DeleteAssignmentAsync(assignment.Id);
+            Snackbar.Add("Assignment deleted", Severity.Success);
+            await LoadAssignments();
+        }
+    }
+}
