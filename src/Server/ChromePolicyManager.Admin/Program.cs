@@ -10,6 +10,12 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddMudServices();
 
+// Increase SignalR message size for large file uploads (ADMX zip ~113MB)
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 200 * 1024 * 1024; // 200MB
+});
+
 // API client
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "https://cpm-dev-api.azurewebsites.net";
 builder.Services.AddHttpClient<PolicyApiClient>(client =>

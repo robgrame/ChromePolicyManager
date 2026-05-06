@@ -68,6 +68,12 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader());
 });
 
+// Increase request size limit for ADMX zip upload
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 200 * 1024 * 1024; // 200MB
+});
+
 var app = builder.Build();
 
 // Auto-migrate database in development
