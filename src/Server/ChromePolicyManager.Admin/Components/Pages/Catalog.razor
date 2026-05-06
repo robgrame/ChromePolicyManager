@@ -408,7 +408,8 @@ else if (_stats is null && !_loading)
         var parameters = new DialogParameters<AddToPolicySetDialog>
         {
             { x => x.Entry, entry },
-            { x => x.PolicySets, _policySets }
+            { x => x.PolicySets, _policySets },
+            { x => x.Api, Api }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
         var dialog = await DialogService.ShowAsync<AddToPolicySetDialog>($"Add {entry.Name}", parameters, options);

@@ -9,12 +9,32 @@
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             Type: @Entry.DataType | Scope: @(Entry.IsRecommended ? "Recommended" : "Mandatory")
         </MudAlert>
-        <MudSelect @bind-Value="_selectedPolicySet" Label="Target PolicySet" Variant="Variant.Outlined" Class="mb-3">
-            @foreach (var ps in PolicySets)
-            {
-                <MudSelectItem Value="@ps">@ps.Name</MudSelectItem>
-            }
-        </MudSelect>
+        
+        @if (!_creatingNew)
+        {
+            <MudSelect @bind-Value="_selectedPolicySet" Label="Target PolicySet" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var ps in PolicySets)
+                {
+                    <MudSelectItem Value="@ps">@ps.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" Class="mb-3"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _creatingNew = true)">
+                Create new PolicySet
+            </MudButton>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_newPolicySetName" Label="New PolicySet Name" Variant="Variant.Outlined" Class="mb-2"
+                          Placeholder="e.g. Chrome Security Baseline" />
+            <MudTextField @bind-Value="_newPolicySetDescription" Label="Description (optional)" Variant="Variant.Outlined" Class="mb-2" />
+            <MudStack Row="true" Spacing="2" Class="mb-3">
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _creatingNew = false)">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" 
+                           Disabled="@(string.IsNullOrWhiteSpace(_newPolicySetName))"
+                           OnClick="CreateNewPolicySet">Create</MudButton>
+            </MudStack>
+        }
 
         @switch (Entry.DataType)
         {
@@ -54,15 +74,36 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public PolicyCatalogEntryDto Entry { get; set; } = default!;
     [Parameter] public List<PolicySetDto> PolicySets { get; set; } = [];
+    [Parameter] public PolicyApiClient Api { get; set; } = default!;
 
     private PolicySetDto? _selectedPolicySet;
     private bool _boolValue = true;
     private int _intValue;
     private string _stringValue = "";
+    private bool _creatingNew;
+    private string _newPolicySetName = "";
+    private string _newPolicySetDescription = "";
 
     protected override void OnInitialized()
     {
         _selectedPolicySet = PolicySets.FirstOrDefault();
+    }
+
+    private async Task CreateNewPolicySet()
+    {
+        if (string.IsNullOrWhiteSpace(_newPolicySetName)) return;
+        try
+        {
+            var newPs = await Api.CreatePolicySetAsync(_newPolicySetName.Trim(), _newPolicySetDescription.Trim());
+            PolicySets.Add(newPs);
+            _selectedPolicySet = newPs;
+            _creatingNew = false;
+        }
+        catch (Exception ex)
+        {
+            // Show error inline - could use Snackbar but we're in a dialog
+            _newPolicySetDescription = $"Error: {ex.Message}";
+        }
     }
 
     private void Cancel() => MudDialog.Cancel();
