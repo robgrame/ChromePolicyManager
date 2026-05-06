@@ -198,7 +198,7 @@ else if (_stats is null && !_loading)
 
     @* Policy table *@
     <MudTable Items="_filteredEntries" Hover="true" Dense="true" Striped="true" Loading="_loading"
-              FixedHeader="true" Height="600px" Virtualize="true">
+              FixedHeader="true" Height="600px">
         <HeaderContent>
             <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
             <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.Category)">Category</MudTableSortLabel></MudTh>
@@ -208,14 +208,14 @@ else if (_stats is null && !_loading)
         </HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Name">
-                <MudText Typo="Typo.body2"><strong>@context.Name</strong></MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@TruncateText(context.DisplayName, 80)</MudText>
+                <MudText Typo="Typo.body2" Style="font-weight:600;">@context.Name</MudText>
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@TruncateText(context.DisplayName, 80)</MudText>
             </MudTd>
             <MudTd DataLabel="Category">
-                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@context.Category</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@context.Category</MudChip>
             </MudTd>
             <MudTd DataLabel="Type">
-                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.DataType)">@context.DataType</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.DataType)" Variant="Variant.Filled">@context.DataType</MudChip>
             </MudTd>
             <MudTd DataLabel="Scope">
                 @if (context.IsRecommended)
