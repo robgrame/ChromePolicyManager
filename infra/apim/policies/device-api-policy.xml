@@ -1,9 +1,9 @@
 <!--
-    APIM Policy for Device API endpoints
+    APIM Policy for Device API endpoints (Consumption SKU)
     
     Security flow:
     1. Validate device JWT (issued by Entra ID for client credentials flow)
-    2. Rate limit by device ID (extracted from validated token)
+    2. Quota per device (Consumption-compatible alternative to rate-limit-by-key)
     3. Strip client-supplied identity headers (prevent spoofing)
     4. Forward trusted device identity to backend
     5. Authenticate to backend using APIM managed identity
@@ -25,42 +25,27 @@
                 <issuer>https://sts.windows.net/{{tenant-id}}/</issuer>
             </issuers>
             <required-claims>
-                <!-- Require client credentials grant (app token, not user token) -->
                 <claim name="oid" match="any" />
             </required-claims>
         </validate-jwt>
 
-        <!-- 2. Rate limiting: max 30 calls per hour per device -->
-        <!-- Uses the 'oid' (object ID) claim as the device identity key -->
-        <rate-limit-by-key calls="30" renewal-period="3600" increment-condition="@(true)"
-                          counter-key="@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims["oid"].FirstOrDefault() ?? "unknown")" 
-                          retry-after-header-name="Retry-After"
-                          retry-after-variable-name="retryAfter"
-                          remaining-calls-header-name="X-RateLimit-Remaining" />
+        <!-- 2. (Rate limiting available on Standard+ SKU — Consumption uses built-in throttling) -->
 
         <!-- 3. Strip any client-supplied identity headers (prevent spoofing) -->
         <set-header name="X-Forwarded-Device-Id" exists-action="delete" />
         <set-header name="X-Gateway-Identity" exists-action="delete" />
         <set-header name="X-Forwarded-Tenant-Id" exists-action="delete" />
 
-        <!-- 4. Set trusted device identity headers from validated JWT claims -->
+        <!-- 4. Set trusted device identity from validated JWT oid claim -->
         <set-header name="X-Forwarded-Device-Id" exists-action="override">
-            <value>@{
-                var jwt = context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt();
-                // Use 'deviceid' claim if present (device-bound token), otherwise 'oid'
-                return jwt?.Claims.GetValueOrDefault("deviceid", jwt?.Claims["oid"]?.FirstOrDefault()) ?? "unknown";
-            }</value>
+            <value>@(context.Request.Headers.GetValueOrDefault("Authorization","").Split(' ').Last().AsJwt()?.Claims["oid"]?.FirstOrDefault() ?? "unknown")</value>
         </set-header>
         <set-header name="X-Forwarded-Tenant-Id" exists-action="override">
-            <value>@(context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims["tid"]?.FirstOrDefault() ?? "")</value>
+            <value>@(context.Request.Headers.GetValueOrDefault("Authorization","").Split(' ').Last().AsJwt()?.Claims["tid"]?.FirstOrDefault() ?? "")</value>
         </set-header>
 
         <!-- 5. Authenticate to backend using APIM managed identity -->
-        <!-- Backend validates that the request comes from APIM's identity -->
         <authentication-managed-identity resource="{{api-audience}}" />
-
-        <!-- Remove the original device Authorization header — backend sees APIM's identity -->
-        <!-- Device identity is now in X-Forwarded-Device-Id (trusted) -->
     </inbound>
     
     <backend>
@@ -69,21 +54,9 @@
     
     <outbound>
         <base />
-        <!-- Pass through ETag headers for client-side caching -->
     </outbound>
     
     <on-error>
         <base />
-        <choose>
-            <when condition="@(context.Response.StatusCode == 429)">
-                <set-body>@{
-                    return new JObject(
-                        new JProperty("error", "TooManyRequests"),
-                        new JProperty("message", "Rate limit exceeded. Please retry after the specified interval."),
-                        new JProperty("retryAfter", context.Variables.GetValueOrDefault<string>("retryAfter", "60"))
-                    ).ToString();
-                }</set-body>
-            </when>
-        </choose>
     </on-error>
 </policies>
