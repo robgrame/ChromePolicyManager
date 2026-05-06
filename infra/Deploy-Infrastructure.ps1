@@ -117,55 +117,79 @@ Write-Host "  ✓ Resource Group: $ResourceGroupName" -ForegroundColor Green
 # ============================================================
 Write-Host "▶ [2/9] Creating Key Vault..." -ForegroundColor Yellow
 
-$kvName = "$Prefix-kv"
+$suffix = $account.id.Substring(0,6)  # Unique suffix from subscription ID
+$kvName = "$Prefix-kv-$suffix"
 az keyvault create `
     --name $kvName `
     --resource-group $ResourceGroupName `
     --location $Location `
     --enable-rbac-authorization true `
     --tags project=$ProjectName environment=$EnvironmentName `
-    --output none 2>$null
+    --output none
+if ($LASTEXITCODE -ne 0) { Write-Host "  ⚠ Key Vault creation failed (name may be taken or soft-deleted)" -ForegroundColor Red }
+else { Write-Host "  ✓ Key Vault: $kvName" -ForegroundColor Green }
 
-Write-Host "  ✓ Key Vault: $kvName" -ForegroundColor Green
+# Assign Key Vault Secrets Officer to current user
+$currentUserId = (az ad signed-in-user show --query id -o tsv)
+az role assignment create --role "Key Vault Secrets Officer" --assignee $currentUserId `
+    --scope "/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.KeyVault/vaults/$kvName" --output none 2>$null
 
 # ============================================================
 # 3. App Configuration
 # ============================================================
 Write-Host "▶ [3/9] Creating App Configuration..." -ForegroundColor Yellow
 
-$appConfigName = "$Prefix-config"
+$appConfigName = "$Prefix-cfg-$suffix"
 az appconfig create `
     --name $appConfigName `
     --resource-group $ResourceGroupName `
     --location $Location `
     --sku Free `
-    --output none 2>$null
-
-Write-Host "  ✓ App Configuration: $appConfigName" -ForegroundColor Green
+    --output none
+if ($LASTEXITCODE -ne 0) { Write-Host "  ⚠ App Configuration failed (Free tier limit may be reached, try Standard)" -ForegroundColor Red }
+else { Write-Host "  ✓ App Configuration: $appConfigName" -ForegroundColor Green }
 
 # ============================================================
 # 4. Azure SQL
 # ============================================================
 Write-Host "▶ [4/9] Creating Azure SQL Server + Database..." -ForegroundColor Yellow
 
-$sqlServerName = "$Prefix-sql"
+$sqlServerName = "$Prefix-sql-$suffix"
 $sqlDbName = "ChromePolicyManager"
-$sqlAdminPassword = [System.Guid]::NewGuid().ToString() + "!Aa1" # Auto-generated strong password
 
+# Register provider if needed
+az provider register --namespace Microsoft.Sql --wait 2>$null
+
+# Use Entra-only auth (MCAPS policy compliant)
+$currentUserName = (az ad signed-in-user show --query displayName -o tsv)
 az sql server create `
     --name $sqlServerName `
     --resource-group $ResourceGroupName `
     --location $Location `
-    --admin-user "sqladmin" `
-    --admin-password $sqlAdminPassword `
-    --output none 2>$null
+    --enable-ad-only-auth `
+    --external-admin-principal-type User `
+    --external-admin-name $currentUserName `
+    --external-admin-sid $currentUserId `
+    --output none
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ⚠ SQL Server creation failed (region may be unavailable, trying northeurope)" -ForegroundColor Red
+    az sql server create `
+        --name $sqlServerName `
+        --resource-group $ResourceGroupName `
+        --location northeurope `
+        --enable-ad-only-auth `
+        --external-admin-principal-type User `
+        --external-admin-name $currentUserName `
+        --external-admin-sid $currentUserId `
+        --output none
+}
 
 az sql db create `
     --name $sqlDbName `
     --resource-group $ResourceGroupName `
     --server $sqlServerName `
     --service-objective Basic `
-    --output none 2>$null
+    --output none
 
 # Allow Azure services
 az sql server firewall-rule create `
@@ -174,43 +198,50 @@ az sql server firewall-rule create `
     --server $sqlServerName `
     --start-ip-address 0.0.0.0 `
     --end-ip-address 0.0.0.0 `
-    --output none 2>$null
+    --output none
 
 Write-Host "  ✓ SQL Server: $sqlServerName" -ForegroundColor Green
 Write-Host "  ✓ Database: $sqlDbName" -ForegroundColor Green
 
-# Store SQL password in Key Vault
-az keyvault secret set --vault-name $kvName --name "SqlAdminPassword" --value $sqlAdminPassword --output none 2>$null
+$sqlConnString = "Server=tcp:$sqlServerName.database.windows.net,1433;Database=$sqlDbName;Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;"
 
 # ============================================================
 # 5. Service Bus
 # ============================================================
 Write-Host "▶ [5/9] Creating Service Bus Namespace + Queue..." -ForegroundColor Yellow
 
-$sbNamespace = "$Prefix-sb"
+$sbNamespace = "$Prefix-sb-$suffix"
+
+# Register provider if needed
+az provider register --namespace Microsoft.ServiceBus --wait 2>$null
+
 az servicebus namespace create `
     --name $sbNamespace `
     --resource-group $ResourceGroupName `
     --location $Location `
     --sku Basic `
-    --output none 2>$null
+    --output none
 
 az servicebus queue create `
     --name "device-reports" `
     --namespace-name $sbNamespace `
     --resource-group $ResourceGroupName `
     --max-delivery-count 5 `
-    --lock-duration "PT5M" `
     --default-message-time-to-live "P7D" `
-    --dead-lettering-on-message-expiration true `
-    --output none 2>$null
+    --output none
 
-# Get connection string
-$sbConnString = (az servicebus namespace authorization-rule keys list `
-    --name RootManageSharedAccessKey `
-    --namespace-name $sbNamespace `
-    --resource-group $ResourceGroupName `
-    --query primaryConnectionString -o tsv)
+# Get connection string (retry - namespace provisioning may still be propagating)
+$sbConnString = $null
+for ($retry = 1; $retry -le 5; $retry++) {
+    $sbConnString = (az servicebus namespace authorization-rule keys list `
+        --name RootManageSharedAccessKey `
+        --namespace-name $sbNamespace `
+        --resource-group $ResourceGroupName `
+        --query primaryConnectionString -o tsv 2>$null)
+    if ($sbConnString) { break }
+    Write-Host "  Waiting for Service Bus namespace to be ready... (attempt $retry/5)" -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 15
+}
 
 Write-Host "  ✓ Service Bus: $sbNamespace" -ForegroundColor Green
 Write-Host "  ✓ Queue: device-reports" -ForegroundColor Green
@@ -256,22 +287,37 @@ Write-Host "▶ [7/9] Creating Entra ID App Registrations..." -ForegroundColor Y
 
 $tenantId = $account.tenantId
 
+# Refresh token to avoid CAE challenges during Graph/Entra operations
+az account get-access-token --resource https://graph.microsoft.com --output none 2>$null
+
 # API App Registration
 $apiAppExists = az ad app list --display-name "$ProjectName-API" --query "[0].appId" -o tsv 2>$null
 if (-not $apiAppExists) {
-    $apiApp = az ad app create `
+    # Create app without identifier URI first (tenant policy may restrict URI format)
+    $apiAppJson = az ad app create `
         --display-name "$ProjectName-API" `
         --sign-in-audience AzureADMyOrg `
-        --identifier-uris "api://chrome-policy-manager" `
-        --output json | ConvertFrom-Json
+        --output json 2>$null
+    
+    if (-not $apiAppJson) {
+        Write-Host "  ⚠ Failed to create API app registration (CAE/permissions issue)" -ForegroundColor Red
+        Write-Host "  Run manually: az ad app create --display-name '$ProjectName-API' --sign-in-audience AzureADMyOrg" -ForegroundColor DarkYellow
+        $apiAppId = "MANUAL_SETUP_REQUIRED"
+        $apiSecret = "MANUAL_SETUP_REQUIRED"
+    }
+    else {
+        $apiApp = $apiAppJson | ConvertFrom-Json
+        $apiAppId = $apiApp.appId
 
-    $apiAppId = $apiApp.appId
+        # Set identifier URI using appId (always allowed by tenant policy)
+        az ad app update --id $apiAppId --identifier-uris "api://$apiAppId" --output none 2>$null
 
-    # Create service principal
-    az ad sp create --id $apiAppId --output none 2>$null
+        # Create service principal
+        az ad sp create --id $apiAppId --output none 2>$null
 
-    # Create client secret
-    $apiSecret = (az ad app credential reset --id $apiAppId --query password -o tsv)
+        # Create client secret
+        $apiSecret = (az ad app credential reset --id $apiAppId --query password -o tsv 2>$null)
+    }
 }
 else {
     $apiAppId = $apiAppExists
@@ -282,14 +328,21 @@ else {
 # Device Client App Registration
 $deviceAppExists = az ad app list --display-name "$ProjectName-DeviceClient" --query "[0].appId" -o tsv 2>$null
 if (-not $deviceAppExists) {
-    $deviceApp = az ad app create `
+    $deviceAppJson = az ad app create `
         --display-name "$ProjectName-DeviceClient" `
         --sign-in-audience AzureADMyOrg `
         --public-client-redirect-uris "urn:ietf:wg:oauth:2.0:oob" `
-        --output json | ConvertFrom-Json
+        --output json 2>$null
 
-    $deviceAppId = $deviceApp.appId
-    az ad sp create --id $deviceAppId --output none 2>$null
+    if ($deviceAppJson) {
+        $deviceApp = $deviceAppJson | ConvertFrom-Json
+        $deviceAppId = $deviceApp.appId
+        az ad sp create --id $deviceAppId --output none 2>$null
+    }
+    else {
+        Write-Host "  ⚠ Failed to create Device Client app (CAE/permissions issue)" -ForegroundColor Red
+        $deviceAppId = "MANUAL_SETUP_REQUIRED"
+    }
 }
 else {
     $deviceAppId = $deviceAppExists
@@ -309,7 +362,7 @@ if ($apiSecret -and $apiSecret -ne "(existing - check Key Vault)") {
 # ============================================================
 Write-Host "▶ [8/9] Configuring Web App..." -ForegroundColor Yellow
 
-$sqlConnString = "Server=tcp:$sqlServerName.database.windows.net,1433;Database=$sqlDbName;User Id=sqladmin;Password=$sqlAdminPassword;Encrypt=True;TrustServerCertificate=False;"
+# $sqlConnString already defined from step 4
 
 az webapp config appsettings set `
     --name $appName `
@@ -318,7 +371,7 @@ az webapp config appsettings set `
         "AzureAd__TenantId=$tenantId" `
         "AzureAd__ClientId=$apiAppId" `
         "AzureAd__Instance=https://login.microsoftonline.com/" `
-        "AzureAd__Audience=api://chrome-policy-manager" `
+        "AzureAd__Audience=api://$apiAppId" `
         "ServiceBus__ConnectionString=$sbConnString" `
         "ServiceBus__DeviceReportQueue=device-reports" `
         "ASPNETCORE_ENVIRONMENT=$( if ($EnvironmentName -eq 'prod') { 'Production' } else { 'Development' })" `
