@@ -139,15 +139,19 @@ az role assignment create --role "Key Vault Secrets Officer" --assignee $current
 # ============================================================
 Write-Host "▶ [3/9] Creating App Configuration..." -ForegroundColor Yellow
 
-$appConfigName = "$Prefix-cfg-$suffix"
+$appConfigName = "$Prefix-appconfig"
 az appconfig create `
     --name $appConfigName `
     --resource-group $ResourceGroupName `
     --location $Location `
-    --sku Free `
+    --sku Standard `
     --output none
-if ($LASTEXITCODE -ne 0) { Write-Host "  ⚠ App Configuration failed (Free tier limit may be reached, try Standard)" -ForegroundColor Red }
-else { Write-Host "  ✓ App Configuration: $appConfigName" -ForegroundColor Green }
+if ($LASTEXITCODE -ne 0) { Write-Host "  ⚠ App Configuration creation failed" -ForegroundColor Red }
+else { Write-Host "  ✓ App Configuration: $appConfigName (Standard)" -ForegroundColor Green }
+
+# Get read-only connection string for Web App
+$appConfigConnStr = az appconfig credential list --name $appConfigName --resource-group $ResourceGroupName `
+    --query "[?name=='Primary Read Only'].connectionString" -o tsv
 
 # ============================================================
 # 4. Azure SQL
@@ -374,6 +378,7 @@ az webapp config appsettings set `
         "AzureAd__Audience=api://$apiAppId" `
         "ServiceBus__ConnectionString=$sbConnString" `
         "ServiceBus__DeviceReportQueue=device-reports" `
+        "AppConfiguration__ConnectionString=$appConfigConnStr" `
         "ASPNETCORE_ENVIRONMENT=$( if ($EnvironmentName -eq 'prod') { 'Production' } else { 'Development' })" `
     --output none
 
