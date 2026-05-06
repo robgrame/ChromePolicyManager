@@ -6,6 +6,7 @@ using Azure.Identity;
 using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Services;
 using ChromePolicyManager.Api.Endpoints;
+using ChromePolicyManager.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -94,6 +95,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowManagementUI");
+app.UseAuthentication();
+app.UseAuthorization();
+
+// APIM gateway enforcement: device endpoints require APIM managed identity
+app.UseApimGateway();
 
 // Map API endpoints
 app.MapPolicyEndpoints();

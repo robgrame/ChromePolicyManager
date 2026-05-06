@@ -206,13 +206,52 @@ Client Device → API: "What policies apply to me?" (GET /devices/{id}/effective
 
 ## 🛡️ Security
 
-- **Entra ID authentication** for API and Admin UI
-- **Managed Identity** for Azure resource access
-- **Key Vault** for secrets (connection strings, client secrets)
+### API Gateway (Azure API Management)
+
+Device-facing endpoints are protected by **Azure API Management** acting as a security gateway. The backend API never receives unauthenticated device traffic.
+
+```
+┌──────────────┐     OAuth2 Token     ┌──────────────┐   Managed Identity   ┌──────────────┐
+│   Device     │ ───────────────────▶ │    APIM      │ ────────────────────▶ │  Backend API │
+│ (PowerShell) │                      │   Gateway    │                       │  (.NET 9)    │
+└──────────────┘                      └──────────────┘                       └──────────────┘
+                                            │
+                                      ┌─────┴─────┐
+                                      │ Validates  │
+                                      │ device JWT │
+                                      │ Rate limits│
+                                      │ Strips     │
+                                      │ spoofable  │
+                                      │ headers    │
+                                      └───────────┘
+```
+
+**Security flow:**
+1. Device acquires OAuth2 token (client credentials + device certificate) from Entra ID
+2. APIM validates JWT (issuer, audience, expiry, required claims)
+3. APIM rate-limits per device identity (30 calls/hour/device)
+4. APIM strips any client-supplied identity headers (anti-spoofing)
+5. APIM sets trusted `X-Forwarded-Device-Id` from validated JWT claims
+6. APIM authenticates to backend using its **managed identity** (no shared secrets)
+7. Backend middleware verifies the request's `appid` claim matches APIM's identity
+
+**Separation of concerns:**
+| Layer | Responsibility |
+|-------|---------------|
+| APIM | Device auth, rate limiting, DDoS protection, request logging |
+| Backend | Business logic, policy resolution, database, Graph API |
+| Admin UI | Direct Entra ID JWT auth (doesn't go through APIM) |
+
+### Additional Security Controls
+
+- **Entra ID authentication** for Admin UI (interactive login)
+- **Managed Identity** for all Azure resource access (no stored credentials)
+- **Key Vault** for secrets (connection strings, Graph client secret)
 - **Entra-only SQL auth** (no SQL passwords — MCAPS compliant)
 - **Audit logging** for all policy changes and device interactions
-- **CORS** restricted to Admin UI origin
+- **CORS** restricted to Admin UI origin only
 - **Service Bus** for async device report processing (202 Accepted pattern)
+- **Backend restriction**: device endpoints reject calls not originating from APIM
 
 ## 📈 Scaling to 100k+ Devices
 

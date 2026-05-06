@@ -22,10 +22,19 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$ApiBaseUrl = "https://cpm-dev-api.azurewebsites.net"
+# API Gateway (APIM) — device traffic goes through the gateway for auth/rate-limiting
+$ApiGatewayUrl = "https://cpm-dev-apim.azure-api.net"
+# Direct backend (fallback if APIM not yet deployed)
+$ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
+# Use APIM gateway when available
+$ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
 $TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
 $ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"  # App registration for device auth
 $Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
+
+# Retry/jitter settings for rate limiting (429) responses
+$MaxRetries = 3
+$BaseJitterSeconds = 5
 
 # Paths
 $ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
@@ -177,25 +186,58 @@ try {
         $headers["If-None-Match"] = "`"$localHash`""
     }
     
-    try {
-        $response = Invoke-WebRequest -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -UseBasicParsing
-        
-        if ($response.StatusCode -eq 304) {
-            # Policy hasn't changed — device is compliant
-            Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
-            Write-Output "Compliant (Hash: $localHash, cached)"
-            exit 0
+    # Add initial jitter to avoid thundering herd (randomize check-in window)
+    $jitter = Get-Random -Minimum 0 -Maximum $BaseJitterSeconds
+    Start-Sleep -Seconds $jitter
+    
+    $retryCount = 0
+    $response = $null
+    $effectivePolicy = $null
+    
+    while ($retryCount -le $MaxRetries) {
+        try {
+            $response = Invoke-WebRequest -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -UseBasicParsing
+            
+            if ($response.StatusCode -eq 304) {
+                # Policy hasn't changed — device is compliant
+                Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
+                Write-Output "Compliant (Hash: $localHash, cached)"
+                exit 0
+            }
+            
+            $effectivePolicy = $response.Content | ConvertFrom-Json
+            break  # Success — exit retry loop
         }
-        
-        $effectivePolicy = $response.Content | ConvertFrom-Json
-    }
-    catch {
-        if ($_.Exception.Response.StatusCode.value__ -eq 304) {
-            Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
-            Write-Output "Compliant (Hash: $localHash, cached)"
-            exit 0
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -eq 304) {
+                Write-Log "304 Not Modified - device is compliant (Hash: $localHash)"
+                Write-Output "Compliant (Hash: $localHash, cached)"
+                exit 0
+            }
+            elseif ($statusCode -eq 429) {
+                # Rate limited by APIM gateway — respect Retry-After header
+                $retryAfter = $_.Exception.Response.Headers["Retry-After"]
+                if (-not $retryAfter) { $retryAfter = 60 }
+                $backoff = [int]$retryAfter + (Get-Random -Minimum 1 -Maximum 10)
+                Write-Log "Rate limited (429). Retry $($retryCount + 1)/$MaxRetries after ${backoff}s" "WARN"
+                $retryCount++
+                if ($retryCount -gt $MaxRetries) {
+                    Write-Log "Max retries exceeded after 429 responses" "ERROR"
+                    # Fall back to cached state
+                    if ($localHash) {
+                        Write-Output "Compliant (offline - rate limited, using cached state)"
+                        exit 0
+                    }
+                    exit 1
+                }
+                Start-Sleep -Seconds $backoff
+            }
+            else {
+                throw
+            }
         }
-        throw
     }
     
     if (-not $effectivePolicy -or (-not $effectivePolicy.mandatoryPolicies -and -not $effectivePolicy.recommendedPolicies)) {

@@ -26,10 +26,19 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$ApiBaseUrl = "https://cpm-dev-api.azurewebsites.net"
+# API Gateway (APIM) — device traffic goes through the gateway for auth/rate-limiting
+$ApiGatewayUrl = "https://cpm-dev-apim.azure-api.net"
+# Direct backend (fallback if APIM not yet deployed)
+$ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
+# Use APIM gateway when available
+$ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
 $TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
 $ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"
 $Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
+
+# Retry/jitter settings
+$MaxRetries = 3
+$BaseJitterSeconds = 5
 
 # Registry paths
 $ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
