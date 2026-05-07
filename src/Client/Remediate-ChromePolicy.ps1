@@ -78,6 +78,25 @@ function Write-Log {
     })
 }
 
+function Get-DeviceInfo {
+    $info = @{
+        OsVersion = [Environment]::OSVersion.Version.ToString()
+        OsBuild = ""
+        Manufacturer = ""
+        Model = ""
+        ChromeVersion = (Get-ChromeVersion)
+    }
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -Property BuildNumber -ErrorAction SilentlyContinue
+        if ($os) { $info.OsBuild = $os.BuildNumber }
+    } catch { }
+    try {
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -Property Manufacturer, Model -ErrorAction SilentlyContinue
+        if ($cs) { $info.Manufacturer = $cs.Manufacturer; $info.Model = $cs.Model }
+    } catch { }
+    return $info
+}
+
 function Send-LogBatch {
     param(
         [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
@@ -85,9 +104,15 @@ function Send-LogBatch {
     )
     if ($script:LogBuffer.Count -eq 0) { return }
     try {
+        $di = Get-DeviceInfo
         $body = @{
             deviceName = $env:COMPUTERNAME
             scriptType = "Remediation"
+            chromeVersion = $di.ChromeVersion
+            osVersion = $di.OsVersion
+            osBuild = $di.OsBuild
+            manufacturer = $di.Manufacturer
+            model = $di.Model
             entries    = @($script:LogBuffer)
         } | ConvertTo-Json -Depth 3 -Compress
 
@@ -271,6 +296,7 @@ function Send-ComplianceReport {
             "Content-Type" = "application/json"
         }
         
+        $di = Get-DeviceInfo
         $report = @{
             deviceId = $DeviceId
             deviceName = $DeviceName
@@ -278,8 +304,11 @@ function Send-ComplianceReport {
             appliedPolicyHash = $PolicyHash
             status = $Status
             errors = $Errors
-            chromeVersion = (Get-ChromeVersion)
-            osVersion = [Environment]::OSVersion.Version.ToString()
+            chromeVersion = $di.ChromeVersion
+            osVersion = $di.OsVersion
+            osBuild = $di.OsBuild
+            manufacturer = $di.Manufacturer
+            model = $di.Model
             policyKeysWritten = $KeysWritten
             policyKeysRemoved = $KeysRemoved
         } | ConvertTo-Json

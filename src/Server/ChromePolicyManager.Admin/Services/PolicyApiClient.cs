@@ -224,6 +224,9 @@ public class DeviceStateDto
     public string? Errors { get; set; }
     public string? ChromeVersion { get; set; }
     public string? OsVersion { get; set; }
+    public string? OsBuild { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? Model { get; set; }
     public DateTime LastContact { get; set; }
     public int PolicyKeysWritten { get; set; }
     public int PolicyKeysRemoved { get; set; }

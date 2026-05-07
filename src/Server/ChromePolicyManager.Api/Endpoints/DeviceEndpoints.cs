@@ -90,7 +90,12 @@ public static class DeviceEndpoints
                     DeviceId = deviceId,
                     DeviceName = request.DeviceName ?? "",
                     LastCheckIn = now,
-                    LastStatus = Models.DeviceComplianceStatus.Unknown
+                    LastStatus = Models.DeviceComplianceStatus.Unknown,
+                    ChromeVersion = request.ChromeVersion,
+                    OsVersion = request.OsVersion,
+                    OsBuild = request.OsBuild,
+                    Manufacturer = request.Manufacturer,
+                    Model = request.Model
                 };
                 db.DeviceStates.Add(deviceState);
             }
@@ -99,6 +104,16 @@ public static class DeviceEndpoints
                 deviceState.LastCheckIn = now;
                 if (!string.IsNullOrEmpty(request.DeviceName))
                     deviceState.DeviceName = request.DeviceName;
+                if (!string.IsNullOrEmpty(request.ChromeVersion))
+                    deviceState.ChromeVersion = request.ChromeVersion;
+                if (!string.IsNullOrEmpty(request.OsVersion))
+                    deviceState.OsVersion = request.OsVersion;
+                if (!string.IsNullOrEmpty(request.OsBuild))
+                    deviceState.OsBuild = request.OsBuild;
+                if (!string.IsNullOrEmpty(request.Manufacturer))
+                    deviceState.Manufacturer = request.Manufacturer;
+                if (!string.IsNullOrEmpty(request.Model))
+                    deviceState.Model = request.Model;
             }
 
             await db.SaveChangesAsync();
@@ -127,6 +142,11 @@ public record DeviceLogBatchRequest
 {
     public string? DeviceName { get; init; }
     public string? ScriptType { get; init; }
+    public string? ChromeVersion { get; init; }
+    public string? OsVersion { get; init; }
+    public string? OsBuild { get; init; }
+    public string? Manufacturer { get; init; }
+    public string? Model { get; init; }
     public List<DeviceLogEntry> Entries { get; init; } = [];
 }
 

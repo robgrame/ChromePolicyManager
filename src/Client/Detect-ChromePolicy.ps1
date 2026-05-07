@@ -81,6 +81,32 @@ function Write-Log {
     })
 }
 
+function Get-DeviceInfo {
+    $info = @{
+        OsVersion = [Environment]::OSVersion.Version.ToString()
+        OsBuild = ""
+        Manufacturer = ""
+        Model = ""
+        ChromeVersion = "Unknown"
+    }
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -Property BuildNumber -ErrorAction SilentlyContinue
+        if ($os) { $info.OsBuild = $os.BuildNumber }
+    } catch { }
+    try {
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -Property Manufacturer, Model -ErrorAction SilentlyContinue
+        if ($cs) { $info.Manufacturer = $cs.Manufacturer; $info.Model = $cs.Model }
+    } catch { }
+    try {
+        $chromePath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+        if (Test-Path $chromePath) {
+            $exePath = (Get-ItemProperty $chromePath -ErrorAction SilentlyContinue).'(default)'
+            if ($exePath -and (Test-Path $exePath)) { $info.ChromeVersion = (Get-Item $exePath).VersionInfo.ProductVersion }
+        }
+    } catch { }
+    return $info
+}
+
 function Send-LogBatch {
     param(
         [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
@@ -88,9 +114,15 @@ function Send-LogBatch {
     )
     if ($script:LogBuffer.Count -eq 0) { return }
     try {
+        $di = Get-DeviceInfo
         $body = @{
             deviceName = $env:COMPUTERNAME
             scriptType = if ($EnableInlineRemediation) { "Detection+InlineRemediation" } else { "Detection" }
+            chromeVersion = $di.ChromeVersion
+            osVersion = $di.OsVersion
+            osBuild = $di.OsBuild
+            manufacturer = $di.Manufacturer
+            model = $di.Model
             entries    = @($script:LogBuffer)
         } | ConvertTo-Json -Depth 3 -Compress
 
@@ -239,10 +271,12 @@ function Send-ComplianceReport {
         [string]$Status, [string]$Errors, [int]$KeysWritten, [int]$KeysRemoved
     )
     try {
+        $di = Get-DeviceInfo
         $report = @{
             deviceId = $DeviceId; deviceName = $DeviceName; userPrincipalName = $null
             appliedPolicyHash = $PolicyHash; status = $Status; errors = $Errors
-            chromeVersion = (Get-ChromeVersion); osVersion = [Environment]::OSVersion.Version.ToString()
+            chromeVersion = $di.ChromeVersion; osVersion = $di.OsVersion
+            osBuild = $di.OsBuild; manufacturer = $di.Manufacturer; model = $di.Model
             policyKeysWritten = $KeysWritten; policyKeysRemoved = $KeysRemoved
         } | ConvertTo-Json
         Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/report" -Method POST -Body $report `

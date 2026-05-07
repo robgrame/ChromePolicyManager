@@ -26,8 +26,8 @@
                     <MudTh>Policy Hash</MudTh>
                     <MudTh>Chrome</MudTh>
                     <MudTh>OS</MudTh>
+                    <MudTh>Model</MudTh>
                     <MudTh>Keys Applied</MudTh>
-                    <MudTh>Keys Removed</MudTh>
                     <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.LastContact)">Last Contact</MudTableSortLabel></MudTh>
                     <MudTh>Errors</MudTh>
                 </HeaderContent>
@@ -52,23 +52,27 @@
                         </MudTooltip>
                     </MudTd>
                     <MudTd>@(context.ChromeVersion ?? "—")</MudTd>
-                    <MudTd>@(context.OsVersion ?? "—")</MudTd>
                     <MudTd>
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">
-                            +@context.PolicyKeysWritten
-                        </MudChip>
+                        <MudText Typo="Typo.body2">@(context.OsVersion ?? "—")</MudText>
+                        @if (!string.IsNullOrEmpty(context.OsBuild))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Build @context.OsBuild</MudText>
+                        }
                     </MudTd>
                     <MudTd>
-                        @if (context.PolicyKeysRemoved > 0)
+                        @if (!string.IsNullOrEmpty(context.Manufacturer) || !string.IsNullOrEmpty(context.Model))
                         {
-                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Warning">
-                                -@context.PolicyKeysRemoved
-                            </MudChip>
+                            <MudText Typo="Typo.body2">@(context.Manufacturer ?? "") @(context.Model ?? "")</MudText>
                         }
                         else
                         {
                             <MudText>—</MudText>
                         }
+                    </MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">
+                            +@context.PolicyKeysWritten
+                        </MudChip>
                     </MudTd>
                     <MudTd>
                         <MudTooltip Text="@context.LastContact.ToLocalTime().ToString("F")">

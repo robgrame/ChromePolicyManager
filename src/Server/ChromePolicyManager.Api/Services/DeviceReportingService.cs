@@ -26,6 +26,9 @@ public class DeviceReportingService
             Errors = request.Errors,
             ChromeVersion = request.ChromeVersion,
             OsVersion = request.OsVersion,
+            OsBuild = request.OsBuild,
+            Manufacturer = request.Manufacturer,
+            Model = request.Model,
             PolicyKeysWritten = request.PolicyKeysWritten,
             PolicyKeysRemoved = request.PolicyKeysRemoved,
             ReportedAt = DateTime.UtcNow
@@ -50,6 +53,9 @@ public class DeviceReportingService
         deviceState.LastError = request.Status == DeviceComplianceStatus.Error ? request.Errors : null;
         deviceState.ChromeVersion = request.ChromeVersion;
         deviceState.OsVersion = request.OsVersion;
+        deviceState.OsBuild = request.OsBuild;
+        deviceState.Manufacturer = request.Manufacturer;
+        deviceState.Model = request.Model;
 
         await _db.SaveChangesAsync();
         return report;
@@ -120,6 +126,9 @@ public class DeviceReportRequest
     public string? Errors { get; set; }
     public string? ChromeVersion { get; set; }
     public string? OsVersion { get; set; }
+    public string? OsBuild { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? Model { get; set; }
     public int? PolicyKeysWritten { get; set; }
     public int? PolicyKeysRemoved { get; set; }
 }

@@ -28,6 +28,9 @@ public static class MonitoringEndpoints
                     Errors = d.LastError,
                     d.ChromeVersion,
                     d.OsVersion,
+                    d.OsBuild,
+                    d.Manufacturer,
+                    d.Model,
                     LastContact = d.LastCheckIn ?? DateTime.MinValue,
                     PolicyKeysWritten = 0,
                     PolicyKeysRemoved = 0
@@ -47,6 +50,9 @@ public static class MonitoringEndpoints
                 Errors = d.LastError,
                 d.ChromeVersion,
                 d.OsVersion,
+                d.OsBuild,
+                d.Manufacturer,
+                d.Model,
                 LastContact = d.LastCheckIn ?? DateTime.MinValue,
                 PolicyKeysWritten = 0,
                 PolicyKeysRemoved = 0
@@ -65,6 +71,9 @@ public static class MonitoringEndpoints
                 Errors = d.LastError,
                 d.ChromeVersion,
                 d.OsVersion,
+                d.OsBuild,
+                d.Manufacturer,
+                d.Model,
                 LastContact = d.LastCheckIn ?? DateTime.MinValue,
                 PolicyKeysWritten = 0,
                 PolicyKeysRemoved = 0
