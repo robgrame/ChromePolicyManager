@@ -395,9 +395,11 @@ else if (_stats is null && !_loading)
 
     private async Task ShowDetails(PolicyCatalogEntryDto entry)
     {
+        // Fetch full details (description, enum options, registry key) on demand
+        var fullEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
         var parameters = new DialogParameters<PolicyDetailsDialog>
         {
-            { x => x.Entry, entry }
+            { x => x.Entry, fullEntry }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
         await DialogService.ShowAsync<PolicyDetailsDialog>(entry.Name, parameters, options);

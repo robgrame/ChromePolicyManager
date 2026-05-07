@@ -97,6 +97,11 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<List<PolicyCatalogEntryDto>>($"/api/catalog{qs}", JsonOptions) ?? [];
     }
 
+    public async Task<PolicyCatalogEntryDto?> GetCatalogEntryAsync(Guid id)
+    {
+        return await _http.GetFromJsonAsync<PolicyCatalogEntryDto>($"/api/catalog/{id}", JsonOptions);
+    }
+
     public async Task<List<string>> GetCatalogCategoriesAsync()
     {
         return await _http.GetFromJsonAsync<List<string>>("/api/catalog/categories", JsonOptions) ?? [];

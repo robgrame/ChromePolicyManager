@@ -12,7 +12,7 @@ public static class CatalogEndpoints
     {
         var group = app.MapGroup("/api/catalog").WithTags("Policy Catalog");
 
-        // GET /api/catalog - Get all catalog entries with optional filters
+        // GET /api/catalog - Get all catalog entries (lightweight, no description/enum)
         group.MapGet("/", async (AppDbContext db, string? category, string? dataType, string? search, bool? recommended) =>
         {
             var query = db.PolicyCatalog.AsQueryable();
@@ -32,9 +32,23 @@ public static class CatalogEndpoints
                     e.DisplayName.Contains(search) ||
                     e.Description.Contains(search));
 
-            var entries = await query.OrderBy(e => e.Category).ThenBy(e => e.Name).ToListAsync();
+            var entries = await query
+                .OrderBy(e => e.Category).ThenBy(e => e.Name)
+                .Select(e => new
+                {
+                    e.Id, e.Name, e.DisplayName, e.Category,
+                    e.DataType, e.IsRecommended, e.PolicyClass
+                })
+                .ToListAsync();
             return Results.Ok(entries);
         }).WithName("GetCatalog");
+
+        // GET /api/catalog/{id} - Get full details for a single policy
+        group.MapGet("/{id:guid}", async (AppDbContext db, Guid id) =>
+        {
+            var entry = await db.PolicyCatalog.FindAsync(id);
+            return entry is not null ? Results.Ok(entry) : Results.NotFound();
+        }).WithName("GetCatalogEntry");
 
         // GET /api/catalog/categories - Get distinct categories
         group.MapGet("/categories", async (AppDbContext db) =>
@@ -48,12 +62,6 @@ public static class CatalogEndpoints
             return Results.Ok(categories);
         }).WithName("GetCatalogCategories");
 
-        // GET /api/catalog/{id} - Get single catalog entry
-        group.MapGet("/{id:guid}", async (Guid id, AppDbContext db) =>
-        {
-            var entry = await db.PolicyCatalog.FindAsync(id);
-            return entry is null ? Results.NotFound() : Results.Ok(entry);
-        }).WithName("GetCatalogEntry");
 
         // GET /api/catalog/stats - Import statistics
         group.MapGet("/stats", async (AppDbContext db) =>
