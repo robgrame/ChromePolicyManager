@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using ChromePolicyManager.Api.Models;
 
@@ -8,6 +9,7 @@ namespace ChromePolicyManager.Api.Services;
 /// Sends device reports to Azure Service Bus for async processing.
 /// The APIM Device API receives the report, enqueues it, and returns 202 immediately.
 /// A background processor (DeviceReportProcessor) picks up messages and processes them.
+/// Supports both Managed Identity (FullyQualifiedNamespace) and connection string auth.
 /// </summary>
 public class DeviceReportQueue
 {
@@ -18,15 +20,23 @@ public class DeviceReportQueue
     public DeviceReportQueue(IConfiguration configuration, ILogger<DeviceReportQueue> logger)
     {
         _logger = logger;
+        var fullyQualifiedNamespace = configuration["ServiceBus:FullyQualifiedNamespace"];
         var connectionString = configuration["ServiceBus:ConnectionString"];
         var queueName = configuration["ServiceBus:DeviceReportQueue"] ?? "device-reports";
 
-        if (!string.IsNullOrEmpty(connectionString))
+        if (!string.IsNullOrEmpty(fullyQualifiedNamespace))
+        {
+            var client = new ServiceBusClient(fullyQualifiedNamespace, new DefaultAzureCredential());
+            _sender = client.CreateSender(queueName);
+            _enabled = true;
+            _logger.LogInformation("Service Bus queue '{Queue}' initialized with Managed Identity ({Namespace})", queueName, fullyQualifiedNamespace);
+        }
+        else if (!string.IsNullOrEmpty(connectionString))
         {
             var client = new ServiceBusClient(connectionString);
             _sender = client.CreateSender(queueName);
             _enabled = true;
-            _logger.LogInformation("Service Bus queue '{Queue}' initialized for device report processing", queueName);
+            _logger.LogInformation("Service Bus queue '{Queue}' initialized with connection string", queueName);
         }
         else
         {

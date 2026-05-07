@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Models;
@@ -11,13 +12,13 @@ namespace ChromePolicyManager.Api.Services;
 /// 
 /// Flow: Device → APIM → Service Bus Queue → [this processor] → Database
 /// 
-/// This decouples the device-facing API (fast 202 response) from the actual processing
-/// (DB writes, Graph calls, alerting), enabling independent scaling.
+/// Supports both Managed Identity (FullyQualifiedNamespace) and connection string auth.
 /// </summary>
 public class DeviceReportProcessor : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<DeviceReportProcessor> _logger;
+    private readonly string? _fullyQualifiedNamespace;
     private readonly string? _connectionString;
     private readonly string _queueName;
 
@@ -25,13 +26,14 @@ public class DeviceReportProcessor : BackgroundService
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _fullyQualifiedNamespace = configuration["ServiceBus:FullyQualifiedNamespace"];
         _connectionString = configuration["ServiceBus:ConnectionString"];
         _queueName = configuration["ServiceBus:DeviceReportQueue"] ?? "device-reports";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (string.IsNullOrEmpty(_connectionString))
+        if (string.IsNullOrEmpty(_fullyQualifiedNamespace) && string.IsNullOrEmpty(_connectionString))
         {
             _logger.LogWarning("Service Bus not configured - DeviceReportProcessor disabled");
             return;
@@ -39,7 +41,17 @@ public class DeviceReportProcessor : BackgroundService
 
         _logger.LogInformation("DeviceReportProcessor starting, listening on queue '{Queue}'", _queueName);
 
-        var client = new ServiceBusClient(_connectionString);
+        ServiceBusClient client;
+        if (!string.IsNullOrEmpty(_fullyQualifiedNamespace))
+        {
+            client = new ServiceBusClient(_fullyQualifiedNamespace, new DefaultAzureCredential());
+            _logger.LogInformation("Service Bus processor using Managed Identity ({Namespace})", _fullyQualifiedNamespace);
+        }
+        else
+        {
+            client = new ServiceBusClient(_connectionString);
+        }
+
         var processor = client.CreateProcessor(_queueName, new ServiceBusProcessorOptions
         {
             AutoCompleteMessages = false,
