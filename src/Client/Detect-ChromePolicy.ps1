@@ -1,15 +1,19 @@
 <#
 .SYNOPSIS
-    Chrome Policy Manager - Detection Script
+    Chrome Policy Manager - Detection Script (with Inline Remediation)
     Checks whether Chrome policies on this device match the expected state from the central API.
+    When drift is detected, applies policies inline without relying on Intune's remediation trigger.
 
 .DESCRIPTION
     This script is deployed via Intune Proactive Remediation (Detection).
     It contacts the Chrome Policy Manager API to get the effective policy for this device,
     then compares it against the currently applied registry state.
+
+    If EnableInlineRemediation is true and a policy mismatch is detected, the script
+    applies the policies directly (writing Chrome registry keys) and verifies the result.
     
-    Exit 0 = Compliant (no remediation needed)
-    Exit 1 = Non-compliant (remediation needed)
+    Exit 0 = Compliant (either already compliant or successfully remediated inline)
+    Exit 1 = Non-compliant (remediation failed or inline remediation disabled)
 
 .NOTES
     Requires: 64-bit PowerShell execution
@@ -37,11 +41,17 @@ $CertSubjectPrefix = "CN="              # Device certs have CN=<deviceId>
 $MaxRetries = 3
 $BaseJitterSeconds = 5
 
+# Inline remediation — applies policies during detection, bypassing Intune's runRemediationScript flag
+$EnableInlineRemediation = $true
+
 # Paths
 $ChromePolicyPath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
 $ChromeRecommendedPath = "HKLM:\SOFTWARE\Policies\Google\Chrome\Recommended"
 $ManifestPath = "HKLM:\SOFTWARE\ChromePolicyManager"
 $ManifestValueName = "PolicyHash"
+$ManifestKeysValue = "ManagedKeys"
+$ManifestHashValue = "PolicyHash"
+$ManifestTimestamp = "LastApplied"
 $LogPath = "$env:ProgramData\ChromePolicyManager\detection.log"
 $MaxLogSizeMB = 5
 
@@ -80,7 +90,7 @@ function Send-LogBatch {
     try {
         $body = @{
             deviceName = $env:COMPUTERNAME
-            scriptType = "Detection"
+            scriptType = if ($EnableInlineRemediation) { "Detection+InlineRemediation" } else { "Detection" }
             entries    = @($script:LogBuffer)
         } | ConvertTo-Json -Depth 3 -Compress
 
@@ -138,6 +148,174 @@ function Get-CurrentPolicyHash {
     }
     catch { }
     return $null
+}
+
+# ============ Inline Remediation Functions ============
+
+function Get-ChromeVersion {
+    try {
+        $chromePath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+        if (Test-Path $chromePath) {
+            $exePath = (Get-ItemProperty $chromePath).'(default)'
+            if ($exePath -and (Test-Path $exePath)) {
+                return (Get-Item $exePath).VersionInfo.ProductVersion
+            }
+        }
+    }
+    catch { }
+    return "Unknown"
+}
+
+function Get-ManagedKeys {
+    try {
+        if (Test-Path $ManifestPath) {
+            $json = (Get-ItemProperty -Path $ManifestPath -Name $ManifestKeysValue -ErrorAction SilentlyContinue).$ManifestKeysValue
+            if ($json) { return ($json | ConvertFrom-Json) }
+        }
+    }
+    catch { }
+    return @{ mandatory = @(); recommended = @() }
+}
+
+function Set-ManagedKeys {
+    param([hashtable]$Keys)
+    if (-not (Test-Path $ManifestPath)) { New-Item -Path $ManifestPath -Force | Out-Null }
+    $json = $Keys | ConvertTo-Json -Compress
+    Set-ItemProperty -Path $ManifestPath -Name $ManifestKeysValue -Value $json
+}
+
+function Write-RegistryPolicy {
+    param([string]$BasePath, [string]$PolicyName, [object]$Value)
+    if (-not (Test-Path $BasePath)) { New-Item -Path $BasePath -Force | Out-Null }
+    if ($Value -is [bool]) {
+        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value ([int]$Value) -Type DWord
+    }
+    elseif ($Value -is [int] -or $Value -is [long]) {
+        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value ([int]$Value) -Type DWord
+    }
+    elseif ($Value -is [string]) {
+        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $Value -Type String
+    }
+    elseif ($Value -is [array]) {
+        $listPath = Join-Path $BasePath $PolicyName
+        if (Test-Path $listPath) { Remove-Item -Path $listPath -Recurse -Force }
+        New-Item -Path $listPath -Force | Out-Null
+        for ($i = 0; $i -lt $Value.Count; $i++) {
+            Set-ItemProperty -Path $listPath -Name ($i + 1).ToString() -Value $Value[$i] -Type String
+        }
+    }
+    elseif ($Value -is [hashtable] -or $Value -is [PSCustomObject]) {
+        $jsonValue = $Value | ConvertTo-Json -Compress -Depth 10
+        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $jsonValue -Type String
+    }
+    else {
+        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $Value.ToString() -Type String
+    }
+}
+
+function Remove-StaleKeys {
+    param([string]$BasePath, [string[]]$PreviousKeys, [string[]]$CurrentKeys)
+    $removed = 0
+    $staleKeys = $PreviousKeys | Where-Object { $_ -notin $CurrentKeys }
+    foreach ($key in $staleKeys) {
+        try {
+            $itemPath = Join-Path $BasePath $key
+            if (Test-Path $itemPath) { Remove-Item -Path $itemPath -Recurse -Force; $removed++ }
+            elseif (Test-Path $BasePath) {
+                $existing = Get-ItemProperty -Path $BasePath -Name $key -ErrorAction SilentlyContinue
+                if ($null -ne $existing.$key) { Remove-ItemProperty -Path $BasePath -Name $key -Force; $removed++ }
+            }
+            Write-Log "Removed stale policy: $key"
+        }
+        catch { Write-Log "Failed to remove stale key '$key': $_" "WARN" }
+    }
+    return $removed
+}
+
+function Send-ComplianceReport {
+    param(
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
+        [string]$DeviceId, [string]$DeviceName, [string]$PolicyHash,
+        [string]$Status, [string]$Errors, [int]$KeysWritten, [int]$KeysRemoved
+    )
+    try {
+        $report = @{
+            deviceId = $DeviceId; deviceName = $DeviceName; userPrincipalName = $null
+            appliedPolicyHash = $PolicyHash; status = $Status; errors = $Errors
+            chromeVersion = (Get-ChromeVersion); osVersion = [Environment]::OSVersion.Version.ToString()
+            policyKeysWritten = $KeysWritten; policyKeysRemoved = $KeysRemoved
+        } | ConvertTo-Json
+        Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/report" -Method POST -Body $report `
+            -ContentType "application/json" -Certificate $ClientCert | Out-Null
+        Write-Log "Compliance report sent successfully"
+    }
+    catch { Write-Log "Failed to send compliance report: $_" "WARN" }
+}
+
+function Invoke-InlineRemediation {
+    param(
+        [object]$EffectivePolicy,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
+        [string]$DeviceId
+    )
+    Write-Log "=== Inline remediation started ==="
+    $serverHash = $EffectivePolicy.hash
+    $deviceName = $env:COMPUTERNAME
+    $previousManaged = Get-ManagedKeys
+    $previousMandatoryKeys = @($previousManaged.mandatory)
+    $previousRecommendedKeys = @($previousManaged.recommended)
+    $keysWritten = 0; $keysRemoved = 0; $errors = @()
+    $currentMandatoryKeys = @(); $currentRecommendedKeys = @()
+
+    # Apply mandatory policies
+    if ($EffectivePolicy.mandatoryPolicies -and $EffectivePolicy.mandatoryPolicies -is [PSCustomObject]) {
+        Write-Log "Applying mandatory policies..."
+        $EffectivePolicy.mandatoryPolicies.PSObject.Properties | ForEach-Object {
+            try {
+                Write-RegistryPolicy -BasePath $ChromePolicyPath -PolicyName $_.Name -Value $_.Value
+                $currentMandatoryKeys += $_.Name; $keysWritten++
+                Write-Log "  Applied: $($_.Name)"
+            }
+            catch { $errors += "Failed mandatory '$($_.Name)': $_"; Write-Log "  FAILED: $($_.Name) - $_" "ERROR" }
+        }
+    }
+
+    # Apply recommended policies
+    if ($EffectivePolicy.recommendedPolicies -and $EffectivePolicy.recommendedPolicies -is [PSCustomObject]) {
+        Write-Log "Applying recommended policies..."
+        $EffectivePolicy.recommendedPolicies.PSObject.Properties | ForEach-Object {
+            try {
+                Write-RegistryPolicy -BasePath $ChromeRecommendedPath -PolicyName $_.Name -Value $_.Value
+                $currentRecommendedKeys += $_.Name; $keysWritten++
+                Write-Log "  Applied: $($_.Name) (Recommended)"
+            }
+            catch { $errors += "Failed recommended '$($_.Name)': $_"; Write-Log "  FAILED: $($_.Name) - $_" "ERROR" }
+        }
+    }
+
+    # Remove stale keys
+    $keysRemoved += (Remove-StaleKeys -BasePath $ChromePolicyPath -PreviousKeys $previousMandatoryKeys -CurrentKeys $currentMandatoryKeys)
+    $keysRemoved += (Remove-StaleKeys -BasePath $ChromeRecommendedPath -PreviousKeys $previousRecommendedKeys -CurrentKeys $currentRecommendedKeys)
+
+    # Update manifest
+    Set-ManagedKeys -Keys @{ mandatory = $currentMandatoryKeys; recommended = $currentRecommendedKeys }
+    if (-not (Test-Path $ManifestPath)) { New-Item -Path $ManifestPath -Force | Out-Null }
+    Set-ItemProperty -Path $ManifestPath -Name $ManifestHashValue -Value $serverHash
+    Set-ItemProperty -Path $ManifestPath -Name $ManifestTimestamp -Value (Get-Date -Format "o")
+
+    # Verify: re-read hash from manifest
+    $verifiedHash = Get-CurrentPolicyHash
+    $success = ($verifiedHash -eq $serverHash) -and ($errors.Count -eq 0)
+
+    $status = if ($errors.Count -eq 0) { "Compliant" } elseif ($keysWritten -gt 0) { "PartiallyApplied" } else { "Error" }
+    $errorsJson = if ($errors.Count -gt 0) { $errors | ConvertTo-Json -Compress } else { $null }
+
+    Send-ComplianceReport -ClientCert $ClientCert -DeviceId $DeviceId -DeviceName $deviceName `
+        -PolicyHash $serverHash -Status $status -Errors $errorsJson `
+        -KeysWritten $keysWritten -KeysRemoved $keysRemoved
+
+    Write-Log "Inline remediation complete: $keysWritten written, $keysRemoved removed, Status: $status, Verified: $success"
+    return @{ Success = $success; KeysWritten = $keysWritten; KeysRemoved = $keysRemoved; Status = $status; Hash = $serverHash }
 }
 
 # Main detection logic
@@ -255,8 +433,23 @@ try {
     }
     else {
         Write-Log "Policy hash mismatch - Server: $serverHash, Local: $localHash" "WARN"
-        Write-Output "Non-compliant (Server: $serverHash, Local: $localHash)"
-        $script:ExitCode = 1; return
+        
+        if ($EnableInlineRemediation) {
+            # Apply policies inline since Intune's remediation trigger is unreliable
+            $result = Invoke-InlineRemediation -EffectivePolicy $effectivePolicy -ClientCert $clientCert -DeviceId $deviceId
+            if ($result.Success) {
+                Write-Output "Remediated inline: $($result.KeysWritten) applied, $($result.KeysRemoved) removed. Hash: $($result.Hash)"
+                $script:ExitCode = 0; return
+            }
+            else {
+                Write-Output "Inline remediation failed: Status=$($result.Status), Hash=$($result.Hash)"
+                $script:ExitCode = 1; return
+            }
+        }
+        else {
+            Write-Output "Non-compliant (Server: $serverHash, Local: $localHash)"
+            $script:ExitCode = 1; return
+        }
     }
 }
 catch {
