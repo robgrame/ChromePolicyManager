@@ -11,19 +11,64 @@ public static class MonitoringEndpoints
         group.MapGet("/dashboard", async (DeviceReportingService service) =>
         {
             var dashboard = await service.GetDashboardAsync();
-            return Results.Ok(dashboard);
+            // Map to client DTO format
+            return Results.Ok(new
+            {
+                dashboard.TotalDevices,
+                dashboard.CompliantDevices,
+                dashboard.NonCompliantDevices,
+                dashboard.ErrorDevices,
+                dashboard.OfflineDevices,
+                RecentReports = dashboard.RecentReports.Select(d => new
+                {
+                    d.DeviceId,
+                    d.DeviceName,
+                    Status = d.LastStatus.ToString(),
+                    AppliedPolicyHash = d.LastAppliedPolicyHash,
+                    Errors = d.LastError,
+                    d.ChromeVersion,
+                    d.OsVersion,
+                    LastContact = d.LastCheckIn ?? DateTime.MinValue,
+                    PolicyKeysWritten = 0,
+                    PolicyKeysRemoved = 0
+                })
+            });
         }).WithName("GetDashboard");
 
         group.MapGet("/offline-devices", async (DeviceReportingService service, int? hoursThreshold) =>
         {
             var devices = await service.GetOfflineDevicesAsync(hoursThreshold ?? 24);
-            return Results.Ok(devices);
+            return Results.Ok(devices.Select(d => new
+            {
+                d.DeviceId,
+                d.DeviceName,
+                Status = d.LastStatus.ToString(),
+                AppliedPolicyHash = d.LastAppliedPolicyHash,
+                Errors = d.LastError,
+                d.ChromeVersion,
+                d.OsVersion,
+                LastContact = d.LastCheckIn ?? DateTime.MinValue,
+                PolicyKeysWritten = 0,
+                PolicyKeysRemoved = 0
+            }));
         }).WithName("GetOfflineDevices");
 
         group.MapGet("/error-devices", async (DeviceReportingService service) =>
         {
             var devices = await service.GetDevicesWithErrorsAsync();
-            return Results.Ok(devices);
+            return Results.Ok(devices.Select(d => new
+            {
+                d.DeviceId,
+                d.DeviceName,
+                Status = d.LastStatus.ToString(),
+                AppliedPolicyHash = d.LastAppliedPolicyHash,
+                Errors = d.LastError,
+                d.ChromeVersion,
+                d.OsVersion,
+                LastContact = d.LastCheckIn ?? DateTime.MinValue,
+                PolicyKeysWritten = 0,
+                PolicyKeysRemoved = 0
+            }));
         }).WithName("GetErrorDevices");
     }
 }

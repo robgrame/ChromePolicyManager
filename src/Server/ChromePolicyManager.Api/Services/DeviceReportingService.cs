@@ -64,6 +64,11 @@ public class DeviceReportingService
         var offlineDevices = await _db.DeviceStates.CountAsync(d => d.LastCheckIn < offlineThreshold);
         var neverCheckedIn = await _db.DeviceStates.CountAsync(d => d.LastCheckIn == null);
 
+        var recentReports = await _db.DeviceStates
+            .OrderByDescending(d => d.LastCheckIn)
+            .Take(100)
+            .ToListAsync();
+
         return new MonitoringDashboard
         {
             TotalDevices = totalDevices,
@@ -72,6 +77,7 @@ public class DeviceReportingService
             ErrorDevices = errorDevices,
             OfflineDevices = offlineDevices,
             NeverCheckedIn = neverCheckedIn,
+            RecentReports = recentReports,
             LastUpdated = DateTime.UtcNow
         };
     }
@@ -126,5 +132,6 @@ public class MonitoringDashboard
     public int ErrorDevices { get; set; }
     public int OfflineDevices { get; set; }
     public int NeverCheckedIn { get; set; }
+    public List<DeviceState> RecentReports { get; set; } = [];
     public DateTime LastUpdated { get; set; }
 }
