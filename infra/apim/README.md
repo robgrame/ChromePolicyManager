@@ -43,7 +43,7 @@ After deployment, get the APIM principal ID and grant it access to the backend A
 
 ```bash
 # Get APIM managed identity object ID
-APIM_PRINCIPAL_ID=$(az apim show -n cpm-dev-apim -g cpm-dev-rg --query identity.principalId -o tsv)
+APIM_PRINCIPAL_ID=$(az apim show -n cpm-dev-apim2 -g rg-cpm-dev --query identity.principalId -o tsv)
 
 # Create an app role assignment for APIM to call the backend API
 az ad app show --id 633d147e-7e43-42b1-abd7-15853f4a8b4b --query id -o tsv
@@ -90,7 +90,7 @@ az webapp config access-restriction add \
 ### 5. Update DNS/Client Configuration
 
 Devices will now call:
-- `https://cpm-dev-apim.azure-api.net/api/devices/{deviceId}/effective-policy`
+- `https://cpm-dev-apim2.azure-api.net/api/devices/{deviceId}/effective-policy`
 
 Instead of:
 - `https://cpm-dev-api.azurewebsites.net/api/devices/{deviceId}/effective-policy`

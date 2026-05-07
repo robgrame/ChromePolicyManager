@@ -1,12 +1,12 @@
-// Azure API Management - Consumption tier
+// Azure API Management - Developer tier with mTLS
 // Acts as security gateway for device-facing endpoints
-// Validates device JWT tokens, rate limits, and authenticates to backend with managed identity
+// Validates client certificates (PKCS/SCEP from MSLABS-SUBCA01)
 
 @description('Azure region for APIM')
 param location string = resourceGroup().location
 
 @description('APIM instance name')
-param apimName string = 'cpm-dev-apim'
+param apimName string = 'cpm-dev-apim2'
 
 @description('Publisher email for APIM')
 param publisherEmail string
@@ -17,22 +17,16 @@ param publisherName string = 'Chrome Policy Manager'
 @description('Backend API URL')
 param backendApiUrl string = 'https://cpm-dev-api.azurewebsites.net'
 
-@description('Entra ID tenant ID for JWT validation')
-param tenantId string
+@description('Application Insights instrumentation key')
+param appInsightsInstrumentationKey string
 
-@description('Device client app registration ID (audience for device tokens)')
-param deviceClientId string
-
-@description('API app registration ID (audience claim in tokens)')
-param apiAudience string
-
-// APIM instance - Consumption tier (serverless, pay-per-call)
+// APIM instance - Developer tier with client cert negotiation
 resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   name: apimName
   location: location
   sku: {
-    name: 'Consumption'
-    capacity: 0
+    name: 'Developer'
+    capacity: 1
   }
   identity: {
     type: 'SystemAssigned'
@@ -40,39 +34,50 @@ resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   properties: {
     publisherEmail: publisherEmail
     publisherName: publisherName
+    hostnameConfigurations: [
+      {
+        type: 'Proxy'
+        hostName: '${apimName}.azure-api.net'
+        negotiateClientCertificate: true
+        defaultSslBinding: true
+        certificateSource: 'BuiltIn'
+      }
+    ]
   }
 }
 
-// Named value for tenant ID (used in policies)
-resource tenantIdValue 'Microsoft.ApiManagement/service/namedValues@2023-09-01-preview' = {
+// App Insights logger
+resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-preview' = {
   parent: apim
-  name: 'tenant-id'
+  name: 'appinsights'
   properties: {
-    displayName: 'tenant-id'
-    value: tenantId
-    secret: false
+    loggerType: 'applicationInsights'
+    credentials: {
+      instrumentationKey: appInsightsInstrumentationKey
+    }
+    isBuffered: true
   }
 }
 
-// Named value for device client ID
-resource deviceClientIdValue 'Microsoft.ApiManagement/service/namedValues@2023-09-01-preview' = {
+// Service-level diagnostics - log all API calls to App Insights
+resource diagnostics 'Microsoft.ApiManagement/service/diagnostics@2023-09-01-preview' = {
   parent: apim
-  name: 'device-client-id'
+  name: 'applicationinsights'
   properties: {
-    displayName: 'device-client-id'
-    value: deviceClientId
-    secret: false
-  }
-}
-
-// Named value for API audience
-resource apiAudienceValue 'Microsoft.ApiManagement/service/namedValues@2023-09-01-preview' = {
-  parent: apim
-  name: 'api-audience'
-  properties: {
-    displayName: 'api-audience'
-    value: apiAudience
-    secret: false
+    loggerId: appInsightsLogger.id
+    alwaysLog: 'allErrors'
+    sampling: {
+      samplingType: 'fixed'
+      percentage: 100
+    }
+    frontend: {
+      request: { headers: []; body: { bytes: 0 } }
+      response: { headers: []; body: { bytes: 0 } }
+    }
+    backend: {
+      request: { headers: []; body: { bytes: 0 } }
+      response: { headers: []; body: { bytes: 0 } }
+    }
   }
 }
 
@@ -103,9 +108,9 @@ resource deviceApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = {
   properties: {
     displayName: 'Chrome Policy Manager - Device API'
     description: 'Device-facing endpoints for Chrome policy delivery and compliance reporting'
-    path: 'api/devices'
+    path: ''
     protocols: ['https']
-    subscriptionRequired: false // Auth is via Entra JWT, not subscription keys
+    subscriptionRequired: false // Auth is via mTLS client certificate
     serviceUrl: '${backendApiUrl}/api/devices'
   }
 }
@@ -137,6 +142,44 @@ resource submitDeviceReport 'Microsoft.ApiManagement/service/apis/operations@202
     displayName: 'Submit Device Report'
     method: 'POST'
     urlTemplate: '/{deviceId}/report'
+    templateParameters: [
+      {
+        name: 'deviceId'
+        required: true
+        type: 'string'
+        description: 'Entra device ID'
+      }
+    ]
+  }
+}
+
+// Operation: Ingest device logs
+resource ingestDeviceLogs 'Microsoft.ApiManagement/service/apis/operations@2023-09-01-preview' = {
+  parent: deviceApi
+  name: 'ingest-device-logs'
+  properties: {
+    displayName: 'Ingest Device Logs'
+    method: 'POST'
+    urlTemplate: '/{deviceId}/logs'
+    templateParameters: [
+      {
+        name: 'deviceId'
+        required: true
+        type: 'string'
+        description: 'Entra device ID'
+      }
+    ]
+  }
+}
+
+// Operation: Get device logs
+resource getDeviceLogs 'Microsoft.ApiManagement/service/apis/operations@2023-09-01-preview' = {
+  parent: deviceApi
+  name: 'get-device-logs'
+  properties: {
+    displayName: 'Get Device Logs'
+    method: 'GET'
+    urlTemplate: '/{deviceId}/logs'
     templateParameters: [
       {
         name: 'deviceId'

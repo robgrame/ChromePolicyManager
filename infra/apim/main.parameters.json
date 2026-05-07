@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "apimName": {
-      "value": "cpm-dev-apim"
+      "value": "cpm-dev-apim2"
     },
     "publisherEmail": {
       "value": "doc@mslabs.it"
@@ -14,14 +14,8 @@
     "backendApiUrl": {
       "value": "https://cpm-dev-api.azurewebsites.net"
     },
-    "tenantId": {
-      "value": "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
-    },
-    "deviceClientId": {
-      "value": "91c07a6b-d678-48d0-b3fa-f0828aca761b"
-    },
-    "apiAudience": {
-      "value": "api://633d147e-7e43-42b1-abd7-15853f4a8b4b"
+    "appInsightsInstrumentationKey": {
+      "value": "02cf651d-ccd8-43c6-858d-64abf0501c9a"
     }
   }
 }

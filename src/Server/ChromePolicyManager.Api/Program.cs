@@ -3,12 +3,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Microsoft.Graph;
 using Azure.Identity;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Services;
 using ChromePolicyManager.Api.Endpoints;
 using ChromePolicyManager.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Application Insights via OpenTelemetry
+builder.Services.AddOpenTelemetry().UseAzureMonitor();
 
 // Database - SQL Server when connection string is configured, SQLite as fallback for local dev
 var sqlConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");

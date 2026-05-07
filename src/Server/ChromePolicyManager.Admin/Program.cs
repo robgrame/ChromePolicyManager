@@ -1,8 +1,12 @@
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ChromePolicyManager.Admin.Components;
 using ChromePolicyManager.Admin.Services;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Application Insights via OpenTelemetry
+builder.Services.AddOpenTelemetry().UseAzureMonitor();
 
 // Add services
 builder.Services.AddRazorComponents()
