@@ -2,7 +2,7 @@
 
 > **Server-side Chrome policy delivery for Entra ID–only (Azure AD joined) devices — bypassing the Group Policy dependency that breaks ADMX-based Chrome settings on cloud-managed endpoints.**
 
-[![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com/)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple)](https://dotnet.microsoft.com/)
 [![Azure](https://img.shields.io/badge/Azure-Deployed-blue)](https://azure.microsoft.com/)
 [![Intune](https://img.shields.io/badge/Intune-Proactive%20Remediation-green)](https://learn.microsoft.com/en-us/mem/intune/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -56,7 +56,10 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 | **Mandatory & Recommended** | Support both Chrome policy scopes per assignment |
 | **Effective Policy Resolution** | Server resolves device → groups → assignments → merged settings (lower priority wins) |
 | **Device Observability** | Real-time compliance dashboard, offline detection, error tracking |
+| **Device Log Ingestion** | Centralized log collection from detection/remediation scripts with level filtering |
+| **Policy Validation** | Schema-based validation of policy values against known Chrome policy types |
 | **Intune Delivery** | Proactive Remediation hourly check → detect drift → apply policies via registry |
+| **Inline Remediation** | Detection script optionally remediates drift without waiting for Intune remediation cycle |
 | **Audit Trail** | Full audit logging for all policy changes and device interactions |
 
 ## 🏗️ Project Structure
@@ -65,18 +68,22 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 ChromePolicyManager/
 ├── src/
 │   ├── Server/
-│   │   ├── ChromePolicyManager.Api/        # REST API (.NET 9 Minimal API)
+│   │   ├── ChromePolicyManager.Api/        # REST API (.NET 10 Minimal API)
 │   │   │   ├── Data/                       # EF Core DbContext + models
-│   │   │   ├── Endpoints/                  # Policy, Assignment, Device, Catalog, Monitoring
-│   │   │   ├── Models/                     # PolicySet, Version, Assignment, CatalogEntry
-│   │   │   └── Services/                   # AdmxParser, EffectivePolicy, Graph, Reporting
+│   │   │   ├── Endpoints/                  # Policy, Assignment, Device, Catalog, Monitoring, Webhook
+│   │   │   ├── Middleware/                 # APIM Gateway authentication middleware
+│   │   │   ├── Models/                     # PolicySet, Version, Assignment, CatalogEntry, DeviceLog
+│   │   │   └── Services/                   # AdmxParser, EffectivePolicy, Graph, Reporting, Validator
 │   │   └── ChromePolicyManager.Admin/      # Blazor Server Admin UI (MudBlazor)
 │   │       └── Components/Pages/           # Dashboard, Catalog, Policies, Assignments, Devices
 │   └── Client/
-│       ├── Detect-ChromePolicy.ps1         # Intune detection script
+│       ├── Detect-ChromePolicy.ps1         # Intune detection script (supports inline remediation)
 │       └── Remediate-ChromePolicy.ps1      # Intune remediation script
 ├── infra/
-│   └── Deploy-Infrastructure.ps1           # One-click Azure deployment
+│   ├── Deploy-Infrastructure.ps1           # One-click Azure deployment
+│   ├── main.bicep                          # Infrastructure-as-Code (Bicep)
+│   ├── main.bicepparam                     # Bicep parameters
+│   └── apim/                               # API Management policies
 └── tools/                                  # ADMX template downloads (gitignored)
 ```
 
@@ -84,7 +91,7 @@ ChromePolicyManager/
 
 ### Prerequisites
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Azure subscription (with Intune license for remediation)
 - `az` CLI authenticated
 - `gh` CLI (optional, for repo operations)
@@ -96,7 +103,9 @@ cd infra
 .\Deploy-Infrastructure.ps1
 ```
 
-This creates: Resource Group, SQL Server (Entra-only auth), App Service Plan (B1), Web Apps (API + Admin), Key Vault, Service Bus, App Configuration.
+This creates: Resource Group, SQL Server (Entra-only auth), App Service Plan (B1), Web Apps (API + Admin), Key Vault, Service Bus, API Management (Developer SKU), App Configuration.
+
+> **Note:** The default Bicep deployment uses cost-optimized SKUs (SQL Basic 5 DTU, Service Bus Basic, App Configuration Free). For production at scale (100k+ devices), upgrade to the recommended SKUs listed in the [Scaling](#-scaling-to-100k-devices) section.
 
 ### 2. Import Chrome Policy Catalog
 
@@ -124,6 +133,7 @@ The deployment script automatically creates a Proactive Remediation in Intune th
 - Runs **hourly** on targeted devices
 - **Detects** drift by comparing local policy hash vs server hash
 - **Remediates** by writing Chrome registry policies directly to `HKLM:\SOFTWARE\Policies\Google\Chrome`
+- Supports **inline remediation** in the detection script (configurable via `$EnableInlineRemediation`) for faster drift correction without waiting for Intune's remediation cycle
 
 ## 🔧 API Endpoints
 
@@ -131,34 +141,60 @@ The deployment script automatically creates a Proactive Remediation in Intune th
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/catalog` | Browse policy catalog (filter: `?category=&search=&dataType=&recommended=`) |
+| `GET` | `/api/catalog/{id}` | Get full details for a single catalog entry |
 | `GET` | `/api/catalog/categories` | List available categories |
 | `GET` | `/api/catalog/stats` | Import statistics |
 | `POST` | `/api/catalog/import` | Import ADMX zip (multipart/form-data) |
+| `POST` | `/api/catalog/import-from-url` | Download and import ADMX templates from a URL |
+| `POST` | `/api/catalog/import-local` | Import ADMX from a local server path |
 
 ### Policy Management
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/policies` | List all PolicySets with versions |
+| `GET` | `/api/policies/{id}` | Get a single PolicySet with its versions |
 | `POST` | `/api/policies` | Create new PolicySet |
 | `POST` | `/api/policies/{id}/versions` | Add version with settings JSON |
 | `POST` | `/api/policies/versions/{id}/promote` | Promote Draft → Active |
 | `POST` | `/api/policies/{id}/rollback/{versionId}` | Rollback to previous version |
+| `POST` | `/api/policies/{id}/add-setting` | Add a single setting to the current draft |
+| `GET` | `/api/policies/{id}/draft-settings` | Get settings from the current draft version |
 
 ### Assignments
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/assignments` | List all assignments |
 | `POST` | `/api/assignments` | Create group assignment (priority + scope) |
+| `PUT` | `/api/assignments/{id}/priority` | Update assignment priority |
 | `DELETE` | `/api/assignments/{id}` | Remove assignment |
+| `GET` | `/api/groups/search` | Search Entra ID groups (for assignment UI) |
 
 ### Device Operations
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/devices/{id}/effective-policy` | Resolve effective policy for device |
-| `POST` | `/api/devices/{id}/report` | Device reports compliance status |
+| `GET` | `/api/devices/{id}/effective-policy` | Resolve effective policy for device (supports ETag/304) |
+| `POST` | `/api/devices/{id}/report` | Device reports compliance status (202 Accepted) |
+| `GET` | `/api/devices/{id}/history` | Get device compliance history |
+| `POST` | `/api/devices/{id}/logs` | Batch ingest device logs (detection/remediation) |
+| `GET` | `/api/devices/{id}/logs` | Query device logs (filter by level, script type) |
+
+### Monitoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `GET` | `/api/monitoring/dashboard` | Compliance dashboard data |
-| `GET` | `/api/monitoring/offline` | Offline devices (>N hours) |
-| `GET` | `/api/monitoring/errors` | Devices with errors |
+| `GET` | `/api/monitoring/offline-devices` | Devices offline >24 hours |
+| `GET` | `/api/monitoring/error-devices` | Devices with recent errors |
+
+### Webhooks
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/webhooks/group-change` | Microsoft Graph change notification receiver |
+| `GET` | `/api/webhooks/changed-groups` | List groups with pending membership changes |
+| `POST` | `/api/webhooks/acknowledge/{groupId}` | Acknowledge a group change (clear dirty flag) |
+
+### Health
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `GET` | `/health` | Health check |
 
 ## 📊 How Policy Resolution Works
@@ -315,28 +351,35 @@ Upgraded from Basic (5 DTU) to Standard S2 to handle sustained write throughput:
 
 ### Recommended SKUs for 100k+ Devices
 
-| Component | SKU | Monthly Cost (est.) |
-|-----------|-----|-------------------|
-| App Service | S2 or P1v3 | €70-140 |
-| Azure SQL | S2 (50 DTU) | €60-150 |
-| Service Bus | Standard | €10 |
-| Total | | **~€150-300/month** |
+The default Bicep deployment uses development-friendly SKUs. For production scale, upgrade to:
+
+| Component | Default (Bicep) | Recommended (100k+) | Monthly Cost (est.) |
+|-----------|----------------|---------------------|-------------------|
+| App Service | B1 | S2 or P1v3 | €70-140 |
+| Azure SQL | Basic (5 DTU) | S2 (50 DTU) | €60-150 |
+| Service Bus | Basic | Standard | €10 |
+| API Management | Developer | Consumption or Standard | €50-300 |
+| App Configuration | Free | Standard | €35 |
+| Total | | | **~€225-635/month** |
 
 ## 📦 Technology Stack
 
 | Component | Technology |
 |-----------|-----------|
-| API | .NET 9, Minimal API, Entity Framework Core |
+| API | .NET 10, Minimal API, Entity Framework Core 10 |
 | Admin UI | Blazor Server, MudBlazor 8 |
-| Database | Azure SQL S2, 50 DTU (Entra-only auth) |
-| Auth | Microsoft Identity Web, MSAL, Device Certificates |
-| Group Resolution | Microsoft Graph SDK + Change Notifications |
+| Database | Azure SQL (Entra-only auth), SQLite fallback for development |
+| Auth | Microsoft Identity Web 3.x, MSAL, Device Certificates |
+| Group Resolution | Microsoft Graph SDK 5.x + Change Notifications |
 | Messaging | Azure Service Bus (async device reports) |
-| Config | Azure App Configuration (Standard) |
+| Config | Azure App Configuration |
 | Secrets | Azure Key Vault |
-| Hosting | Azure App Service (B1 → S2 at scale) |
+| Observability | Azure Monitor OpenTelemetry |
+| Hosting | Azure App Service (B1 default, scale to S2/P1v3) |
+| API Gateway | Azure API Management (Developer SKU default) |
 | Client | PowerShell 5.1 (Intune Proactive Remediation) |
 | Policy Catalog | Chrome ADMX/ADML parser (700+ policies) |
+| Validation | ChromePolicyValidator (schema validation for known policy types) |
 
 ## 🤝 Contributing
 
