@@ -99,7 +99,6 @@ function Send-LogBatch {
         Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [WARN] Log batch upload failed: $_" -ErrorAction SilentlyContinue
     }
 }
-}
 
 function Get-DeviceId {
     try {
