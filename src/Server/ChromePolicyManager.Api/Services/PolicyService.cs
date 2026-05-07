@@ -101,6 +101,81 @@ public class PolicyService
         return target;
     }
 
+    public async Task<object?> AddSettingToDraftAsync(Guid policySetId, string policyName, object value, string? actor = null)
+    {
+        var policySet = await _db.PolicySets
+            .Include(p => p.Versions)
+            .FirstOrDefaultAsync(p => p.Id == policySetId);
+        if (policySet == null) return null;
+
+        // Find existing draft or create one
+        var draft = policySet.Versions
+            .Where(v => v.Status == PolicyVersionStatus.Draft)
+            .OrderByDescending(v => v.CreatedAt)
+            .FirstOrDefault();
+
+        Dictionary<string, JsonElement> settings;
+
+        if (draft != null)
+        {
+            // Parse existing settings and add/update
+            settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(draft.SettingsJson)
+                ?? new Dictionary<string, JsonElement>();
+        }
+        else
+        {
+            settings = new Dictionary<string, JsonElement>();
+            // Determine next version number
+            var latest = policySet.Versions.OrderByDescending(v => v.CreatedAt).FirstOrDefault();
+            var nextVersion = "1.0.0";
+            if (latest != null)
+            {
+                var parts = latest.Version.Split('.');
+                if (parts.Length == 3 && int.TryParse(parts[2], out var patch))
+                    nextVersion = $"{parts[0]}.{parts[1]}.{patch + 1}";
+            }
+
+            draft = new PolicySetVersion
+            {
+                PolicySetId = policySetId,
+                Version = nextVersion,
+                SettingsJson = "{}",
+                Hash = "",
+                Status = PolicyVersionStatus.Draft
+            };
+            _db.PolicySetVersions.Add(draft);
+        }
+
+        // Add/update the policy value
+        var jsonValue = JsonSerializer.SerializeToElement(value);
+        settings[policyName] = jsonValue;
+
+        draft.SettingsJson = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+        draft.Hash = ComputeHash(draft.SettingsJson);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("PolicySetting.Added", actor, "PolicySet", policySetId.ToString(),
+            $"Added {policyName} to draft {draft.Version}");
+
+        return new { draft.Id, draft.Version, PolicyName = policyName, Value = value, TotalSettings = settings.Count };
+    }
+
+    public async Task<object> GetDraftSettingsAsync(Guid policySetId)
+    {
+        var draft = await _db.PolicySetVersions
+            .Where(v => v.PolicySetId == policySetId && v.Status == PolicyVersionStatus.Draft)
+            .OrderByDescending(v => v.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (draft == null)
+            return new { HasDraft = false, Version = (string?)null, Settings = "{}", Count = 0 };
+
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(draft.SettingsJson)
+            ?? new Dictionary<string, JsonElement>();
+
+        return new { HasDraft = true, Version = draft.Version, Settings = draft.SettingsJson, Count = settings.Count };
+    }
+
     private static string ComputeHash(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));

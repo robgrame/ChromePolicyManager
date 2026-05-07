@@ -8,12 +8,23 @@
     <DialogContent>
         <MudTextField @bind-Value="_version" Label="Version" Required="true" Variant="Variant.Outlined"
                       Placeholder="e.g. 1.0.0" Class="mb-3" />
-        <MudText Typo="Typo.subtitle2" Class="mb-1">Chrome Policy Settings (JSON)</MudText>
-        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
-            Enter Chrome policy keys and values. Example: {"SafeBrowsingProtectionLevel": 2, "URLBlocklist": ["*://malware.test/*"]}
-        </MudText>
+        
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Chrome Policy Settings</MudText>
+        @if (_settingsCount > 0)
+        {
+            <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">
+                @_settingsCount policies configured in this draft (added via catalog ➕ button)
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                Add policies from the Catalog page using the ➕ button, or edit the JSON below manually.
+            </MudAlert>
+        }
         <MudTextField @bind-Value="_settingsJson" Label="Settings JSON" Variant="Variant.Outlined"
-                      Lines="12" Placeholder='{"PolicyName": value, ...}' Style="font-family: monospace;" />
+                      Lines="12" Placeholder='{"PolicyName": value, ...}' Style="font-family: monospace;"
+                      HelperText="Auto-populated from catalog additions. You can also edit manually." />
         
         @if (_warnings.Any())
         {
@@ -37,6 +48,7 @@
 
     private string _version = "";
     private string _settingsJson = "";
+    private int _settingsCount;
     private List<string> _warnings = [];
 
     protected override void OnInitialized()
@@ -45,11 +57,22 @@
         {
             var latest = PolicySet.Versions.OrderByDescending(v => v.CreatedAt).First();
             _settingsJson = latest.SettingsJson;
+            _settingsCount = CountSettings(latest.SettingsJson);
             // Suggest next version
             var parts = latest.Version.Split('.');
             if (parts.Length == 3 && int.TryParse(parts[2], out var patch))
                 _version = $"{parts[0]}.{parts[1]}.{patch + 1}";
         }
+    }
+
+    private static int CountSettings(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.EnumerateObject().Count();
+        }
+        catch { return 0; }
     }
 
     private async Task Submit()

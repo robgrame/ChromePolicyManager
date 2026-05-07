@@ -130,6 +130,14 @@ public class PolicyApiClient
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
     }
+
+    // === PolicySet Settings ===
+    public async Task AddSettingToDraftAsync(Guid policySetId, string policyName, object value)
+    {
+        var response = await _http.PostAsJsonAsync($"/api/policies/{policySetId}/add-setting", 
+            new { policyName, value });
+        response.EnsureSuccessStatusCode();
+    }
 }
 
 // === DTOs ===

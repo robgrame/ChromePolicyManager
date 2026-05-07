@@ -53,8 +53,24 @@ public static class PolicyEndpoints
             var version = await service.RollbackVersionAsync(policySetId, targetVersionId);
             return version is null ? Results.NotFound() : Results.Ok(version);
         }).WithName("RollbackVersion");
+
+        // Add a single policy setting to the PolicySet's current draft
+        group.MapPost("/{policySetId:guid}/add-setting", async (Guid policySetId,
+            [FromBody] AddSettingRequest request, PolicyService service) =>
+        {
+            var result = await service.AddSettingToDraftAsync(policySetId, request.PolicyName, request.Value);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("AddSettingToDraft");
+
+        // Get the current draft settings for a PolicySet
+        group.MapGet("/{policySetId:guid}/draft-settings", async (Guid policySetId, PolicyService service) =>
+        {
+            var settings = await service.GetDraftSettingsAsync(policySetId);
+            return Results.Ok(settings);
+        }).WithName("GetDraftSettings");
     }
 }
 
 public record CreatePolicySetRequest(string Name, string Description);
 public record CreateVersionRequest(string Version, string SettingsJson);
+public record AddSettingRequest(string PolicyName, object Value);

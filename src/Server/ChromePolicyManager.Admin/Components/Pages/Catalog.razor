@@ -414,22 +414,32 @@ else if (_stats is null && !_loading)
             { x => x.Api, Api }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<AddToPolicySetDialog>($"Add {entry.Name}", parameters, options);
+        var dialog = await DialogService.ShowAsync<AddToPolicySetDialog>($"Add {entry.DisplayName}", parameters, options);
         var result = await dialog.Result;
 
         if (result is not null && !result.Canceled && result.Data is AddToPolicySetResult addResult)
         {
-            var value = entry.DataType switch
+            try
             {
-                "Boolean" => addResult.Value is bool b ? (b ? "true" : "false") : addResult.Value.ToString()!,
-                "Integer" => addResult.Value.ToString()!,
-                "List" => addResult.Value is string s
-                    ? System.Text.Json.JsonSerializer.Serialize(s.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                    : addResult.Value.ToString()!,
-                _ => $"\"{addResult.Value}\""
-            };
+                // Determine the actual value to store
+                object value = entry.DataType switch
+                {
+                    "Boolean" => addResult.Value is bool b ? (b ? 1 : 0) : addResult.Value,
+                    "Integer" => addResult.Value,
+                    "List" => addResult.Value is string s
+                        ? s.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToArray()
+                        : addResult.Value,
+                    _ => addResult.Value
+                };
 
-            Snackbar.Add($"Added {entry.Name} = {value} to \"{addResult.PolicySet.Name}\" (include in next version)", Severity.Success);
+                // Call API to add setting to the PolicySet's draft
+                await Api.AddSettingToDraftAsync(addResult.PolicySet.Id, entry.Name, value);
+                Snackbar.Add($"✅ Added \"{entry.Name}\" to \"{addResult.PolicySet.Name}\" draft", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"❌ Failed to add: {ex.Message}", Severity.Error);
+            }
         }
     }
 
