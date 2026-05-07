@@ -26,14 +26,10 @@ else
 // Microsoft Identity / Auth
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
 
-// Microsoft Graph client
+// Microsoft Graph client (uses Managed Identity in Azure, falls back to CLI locally)
 builder.Services.AddSingleton(sp =>
 {
-    var config = builder.Configuration.GetSection("AzureAd");
-    var credential = new ClientSecretCredential(
-        config["TenantId"],
-        config["ClientId"],
-        config["ClientSecret"]);
+    var credential = new DefaultAzureCredential();
     return new GraphServiceClient(credential, new[] { "https://graph.microsoft.com/.default" });
 });
 
