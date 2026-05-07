@@ -37,7 +37,7 @@
                             <MudIcon Icon="@Icons.Material.Filled.Computer" Size="Size.Small" Color="@GetDeviceIconColor(context)" />
                             <MudText Typo="Typo.body2"><strong>@context.DeviceName</strong></MudText>
                         </MudStack>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.DeviceId[..8]…</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@Truncate(context.DeviceId, 8)…</MudText>
                     </MudTd>
                     <MudTd>
                         <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
@@ -47,7 +47,7 @@
                     <MudTd>
                         <MudTooltip Text="@(context.AppliedPolicyHash ?? "None")">
                             <MudText Typo="Typo.caption" Style="font-family: monospace;">
-                                @(context.AppliedPolicyHash?[..12] ?? "—")…
+                                @(Truncate(context.AppliedPolicyHash, 12))
                             </MudText>
                         </MudTooltip>
                     </MudTd>
@@ -125,7 +125,7 @@
                         <MudText Color="Color.Warning">@GetRelativeTime(context.LastContact)</MudText>
                     </MudTd>
                     <MudTd>@context.Status</MudTd>
-                    <MudTd><MudText Typo="Typo.caption" Style="font-family:monospace;">@(context.AppliedPolicyHash?[..12] ?? "—")…</MudText></MudTd>
+                    <MudTd><MudText Typo="Typo.caption" Style="font-family:monospace;">@(Truncate(context.AppliedPolicyHash, 12))</MudText></MudTd>
                 </RowTemplate>
             </MudTable>
         }
@@ -237,5 +237,11 @@
         if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
         if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
         return $"{(int)diff.TotalDays}d ago";
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return "—";
+        return value.Length <= maxLength ? value : value[..maxLength] + "…";
     }
 }

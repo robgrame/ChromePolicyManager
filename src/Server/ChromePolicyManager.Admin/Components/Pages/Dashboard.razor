@@ -65,7 +65,7 @@ else if (_dashboard is not null)
             <MudTd>
                 <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
             </MudTd>
-            <MudTd><MudText Typo="Typo.caption">@(context.AppliedPolicyHash?[..12] ?? "—")…</MudText></MudTd>
+            <MudTd><MudText Typo="Typo.caption">@Truncate(context.AppliedPolicyHash, 12)</MudText></MudTd>
             <MudTd>@(context.ChromeVersion ?? "—")</MudTd>
             <MudTd>@context.PolicyKeysWritten</MudTd>
             <MudTd>@context.LastContact.ToLocalTime().ToString("g")</MudTd>
@@ -95,4 +95,10 @@ else
         "Error" => Color.Error,
         _ => Color.Default
     };
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return "—";
+        return value.Length <= maxLength ? value : value[..maxLength] + "…";
+    }
 }
