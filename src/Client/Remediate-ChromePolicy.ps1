@@ -27,7 +27,7 @@ $ErrorActionPreference = "Stop"
 
 # Configuration
 # API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
-$ApiGatewayUrl = "https://cpm-dev-apim.azure-api.net"
+$ApiGatewayUrl = "https://cpm-dev-apim2.azure-api.net"
 # Direct backend (fallback if APIM not yet deployed)
 $ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
 # Use APIM gateway when available

@@ -1,63 +1,56 @@
 <!--
-    APIM Policy for Device API endpoints (Consumption SKU)
+    APIM Policy for Device API endpoints (Developer SKU)
     
     Security flow:
-    1. Validate device client certificate (mTLS - issued by PKCS/SCEP via Intune)
-    2. Extract device identity from certificate subject
-    3. Strip client-supplied identity headers (prevent spoofing)
-    4. Forward trusted device identity to backend
-    5. Authenticate to backend using APIM managed identity
+    1. Validate client certificate (mTLS) issued by MSLABS-SUBCA01
+    2. Strip client-supplied identity headers (prevent spoofing)
+    3. Set trusted device identity from certificate CN (= Entra Device ID)
+    4. Authenticate to backend using APIM managed identity
 -->
 <policies>
     <inbound>
         <base />
-        
-        <!-- 1. Validate device client certificate against trusted Sub CA -->
-        <validate-client-certificate 
-            validate-revocation="false"
-            validate-trust="true"
-            validate-not-before="true"
-            validate-not-after="true"
-            ignore-error="false">
-            <identities>
-                <identity
-                    thumbprint="A1BC56C613DB7C92E0E592794658BB2ECEBB4892" />
-            </identities>
-        </validate-client-certificate>
-
-        <!-- 2. Extract device identity from certificate CN (format: CN=<deviceId>) -->
-        <set-variable name="deviceCN" value="@{
-            var cert = context.Request.Certificate;
-            if (cert == null) return "unknown";
-            var subject = cert.Subject;
-            var cn = subject.Split(',')
-                .Select(s => s.Trim())
-                .FirstOrDefault(s => s.StartsWith("CN=", StringComparison.OrdinalIgnoreCase));
-            return cn != null ? cn.Substring(3) : "unknown";
-        }" />
-
-        <!-- 3. Strip any client-supplied identity headers (prevent spoofing) -->
+        <!-- 1. Validate client certificate -->
+        <choose>
+            <when condition="@(context.Request.Certificate == null)">
+                <return-response>
+                    <set-status code="401" reason="Unauthorized" />
+                    <set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header>
+                    <set-body>{"error":"Client certificate required"}</set-body>
+                </return-response>
+            </when>
+            <when condition="@(context.Request.Certificate.NotAfter &lt; DateTime.UtcNow)">
+                <return-response>
+                    <set-status code="401" reason="Unauthorized" />
+                    <set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header>
+                    <set-body>{"error":"Client certificate expired"}</set-body>
+                </return-response>
+            </when>
+            <when condition="@(!context.Request.Certificate.Issuer.Contains(&quot;MSLABS-SUBCA01&quot;))">
+                <return-response>
+                    <set-status code="401" reason="Unauthorized" />
+                    <set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header>
+                    <set-body>{"error":"Certificate not issued by trusted CA"}</set-body>
+                </return-response>
+            </when>
+        </choose>
+        <!-- 2. Strip any client-supplied identity headers -->
         <set-header name="X-Forwarded-Device-Id" exists-action="delete" />
         <set-header name="X-Gateway-Identity" exists-action="delete" />
         <set-header name="X-Forwarded-Tenant-Id" exists-action="delete" />
-
-        <!-- 4. Set trusted device identity from certificate -->
+        <!-- 3. Set trusted device identity from certificate CN -->
         <set-header name="X-Forwarded-Device-Id" exists-action="override">
-            <value>@((string)context.Variables["deviceCN"])</value>
+            <value>@(context.Request.Certificate.Subject.Replace("CN=",""))</value>
         </set-header>
-
-        <!-- 5. Authenticate to backend using APIM managed identity -->
-        <authentication-managed-identity resource="{{api-audience}}" />
+        <!-- 4. Authenticate to backend using APIM managed identity -->
+        <authentication-managed-identity resource="api://cpm-dev-api" />
     </inbound>
-    
     <backend>
         <base />
     </backend>
-    
     <outbound>
         <base />
     </outbound>
-    
     <on-error>
         <base />
     </on-error>
