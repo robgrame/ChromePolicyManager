@@ -2,8 +2,8 @@
     APIM Policy for Device API endpoints (Consumption SKU)
     
     Security flow:
-    1. Validate device JWT (issued by Entra ID for client credentials flow)
-    2. Quota per device (Consumption-compatible alternative to rate-limit-by-key)
+    1. Validate device client certificate (mTLS - issued by PKCS/SCEP via Intune)
+    2. Extract device identity from certificate subject
     3. Strip client-supplied identity headers (prevent spoofing)
     4. Forward trusted device identity to backend
     5. Authenticate to backend using APIM managed identity
@@ -12,36 +12,38 @@
     <inbound>
         <base />
         
-        <!-- 1. Validate the device JWT token from Entra ID -->
-        <validate-jwt header-name="Authorization" failed-validation-httpcode="401" 
-                      failed-validation-error-message="Unauthorized. Valid device token required."
-                      require-expiration-time="true" require-scheme="Bearer">
-            <openid-config url="https://login.microsoftonline.com/{{tenant-id}}/v2.0/.well-known/openid-configuration" />
-            <audiences>
-                <audience>{{api-audience}}</audience>
-            </audiences>
-            <issuers>
-                <issuer>https://login.microsoftonline.com/{{tenant-id}}/v2.0</issuer>
-                <issuer>https://sts.windows.net/{{tenant-id}}/</issuer>
-            </issuers>
-            <required-claims>
-                <claim name="oid" match="any" />
-            </required-claims>
-        </validate-jwt>
+        <!-- 1. Validate device client certificate against trusted Root CA -->
+        <validate-client-certificate 
+            validate-revocation="false"
+            validate-trust="true"
+            validate-not-before="true"
+            validate-not-after="true"
+            ignore-error="false">
+            <identities>
+                <identity
+                    thumbprint="{{device-ca-thumbprint}}" />
+            </identities>
+        </validate-client-certificate>
 
-        <!-- 2. (Rate limiting available on Standard+ SKU — Consumption uses built-in throttling) -->
+        <!-- 2. Extract device identity from certificate CN (format: CN=<deviceId>) -->
+        <set-variable name="deviceCN" value="@{
+            var cert = context.Request.Certificate;
+            if (cert == null) return "unknown";
+            var subject = cert.Subject;
+            var cn = subject.Split(',')
+                .Select(s => s.Trim())
+                .FirstOrDefault(s => s.StartsWith("CN=", StringComparison.OrdinalIgnoreCase));
+            return cn != null ? cn.Substring(3) : "unknown";
+        }" />
 
         <!-- 3. Strip any client-supplied identity headers (prevent spoofing) -->
         <set-header name="X-Forwarded-Device-Id" exists-action="delete" />
         <set-header name="X-Gateway-Identity" exists-action="delete" />
         <set-header name="X-Forwarded-Tenant-Id" exists-action="delete" />
 
-        <!-- 4. Set trusted device identity from validated JWT oid claim -->
+        <!-- 4. Set trusted device identity from certificate -->
         <set-header name="X-Forwarded-Device-Id" exists-action="override">
-            <value>@(context.Request.Headers.GetValueOrDefault("Authorization","").Split(' ').Last().AsJwt()?.Claims["oid"]?.FirstOrDefault() ?? "unknown")</value>
-        </set-header>
-        <set-header name="X-Forwarded-Tenant-Id" exists-action="override">
-            <value>@(context.Request.Headers.GetValueOrDefault("Authorization","").Split(' ').Last().AsJwt()?.Claims["tid"]?.FirstOrDefault() ?? "")</value>
+            <value>@((string)context.Variables["deviceCN"])</value>
         </set-header>
 
         <!-- 5. Authenticate to backend using APIM managed identity -->

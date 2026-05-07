@@ -21,11 +21,33 @@
                           Placeholder="GUID of the active policy version" Class="mb-3" />
         }
 
-        <MudTextField @bind-Value="_entraGroupId" Label="Entra Group ID" Required="true" Variant="Variant.Outlined"
-                      Placeholder="GUID of the Entra security group" Class="mb-3"
-                      HelperText="Find group IDs in Entra ID → Groups" />
-        <MudTextField @bind-Value="_groupName" Label="Group Display Name" Required="true" Variant="Variant.Outlined"
-                      Placeholder="e.g. CPM - All Chrome Devices" Class="mb-3" />
+        <MudAutocomplete T="EntraGroupDto" Label="Entra Group" Required="true" Variant="Variant.Outlined"
+                         SearchFunc="SearchGroupsAsync" ToStringFunc="@(g => g?.DisplayName ?? "")"
+                         Value="_selectedGroup" ValueChanged="OnGroupSelected"
+                         Placeholder="Type group name to search..." Class="mb-3"
+                         MinCharacters="2" DebounceInterval="300" MaxItems="10"
+                         Dense="true" ShowProgressIndicator="true">
+            <ItemTemplate>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Small" Color="Color.Primary" />
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2"><b>@context.DisplayName</b></MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.GroupType — @(context.Description ?? context.Id)</MudText>
+                    </MudStack>
+                </MudStack>
+            </ItemTemplate>
+            <NoItemsTemplate>
+                <MudText Typo="Typo.body2" Class="pa-2">No groups found</MudText>
+            </NoItemsTemplate>
+        </MudAutocomplete>
+
+        @if (_selectedGroup != null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="mb-3">
+                ID: @_selectedGroup.Id
+            </MudText>
+        }
+
         <MudNumericField @bind-Value="_priority" Label="Priority" Variant="Variant.Outlined" Min="1" Max="9999"
                          HelperText="Lower number = higher priority (wins on conflict)" Class="mb-3" />
         <MudSelect @bind-Value="_scope" Label="Scope" Variant="Variant.Outlined"
@@ -47,8 +69,7 @@
     [Parameter] public Guid? PolicySetVersionId { get; set; }
     [Parameter] public string? VersionLabel { get; set; }
 
-    private string _entraGroupId = "";
-    private string _groupName = "";
+    private EntraGroupDto? _selectedGroup;
     private string _policySetVersionId = "";
     private int _priority = 100;
     private int _scope = 0;
@@ -59,17 +80,36 @@
             _policySetVersionId = PolicySetVersionId.Value.ToString();
     }
 
-    private bool IsValid => !string.IsNullOrWhiteSpace(_entraGroupId) &&
-                            !string.IsNullOrWhiteSpace(_groupName) &&
+    private bool IsValid => _selectedGroup != null &&
                             (PolicySetVersionId.HasValue || Guid.TryParse(_policySetVersionId, out _));
+
+    private async Task<IEnumerable<EntraGroupDto>> SearchGroupsAsync(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length < 2)
+            return [];
+        try
+        {
+            return await Api.SearchGroupsAsync(value);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void OnGroupSelected(EntraGroupDto? group)
+    {
+        _selectedGroup = group;
+    }
 
     private async Task Submit()
     {
+        if (_selectedGroup == null) return;
         try
         {
             var versionId = PolicySetVersionId ?? Guid.Parse(_policySetVersionId);
-            await Api.CreateAssignmentAsync(versionId, _entraGroupId, _groupName, _priority, _scope);
-            Snackbar.Add($"Assignment to '{_groupName}' created!", Severity.Success);
+            await Api.CreateAssignmentAsync(versionId, _selectedGroup.Id, _selectedGroup.DisplayName, _priority, _scope);
+            Snackbar.Add($"Assignment to '{_selectedGroup.DisplayName}' created!", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (Exception ex)

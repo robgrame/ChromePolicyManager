@@ -22,15 +22,16 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-# API Gateway (APIM) — device traffic goes through the gateway for auth/rate-limiting
+# API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
 $ApiGatewayUrl = "https://cpm-dev-apim.azure-api.net"
 # Direct backend (fallback if APIM not yet deployed)
 $ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
 # Use APIM gateway when available
 $ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
-$TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
-$ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"  # App registration for device auth
-$Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
+
+# Client certificate configuration (issued by Intune PKCS/SCEP profile)
+$CertIssuerMatch = "CN=CPM-Device-CA"  # Issuer CN of the Root CA that signs device certs
+$CertSubjectPrefix = "CN="             # Device certs have CN=<deviceId>
 
 # Retry/jitter settings for rate limiting (429) responses
 $MaxRetries = 3
@@ -67,69 +68,23 @@ function Get-DeviceId {
     return $null
 }
 
-function Get-AccessToken {
-    # Acquire token using device identity (MSAL.PS or certificate-based)
+function Get-ClientCertificate {
+    # Find the client certificate issued by the CPM Root CA (deployed via Intune PKCS/SCEP)
     try {
-        # Method 1: Try using the device certificate from Entra join
-        $certThumbprint = (Get-ChildItem Cert:\LocalMachine\My | 
-            Where-Object { $_.Subject -match "CN=.*" -and $_.Issuer -match "MS-Organization-Access" } |
-            Select-Object -First 1).Thumbprint
+        $cert = Get-ChildItem Cert:\LocalMachine\My |
+            Where-Object { $_.Issuer -match $CertIssuerMatch -and $_.NotAfter -gt (Get-Date) } |
+            Sort-Object NotAfter -Descending |
+            Select-Object -First 1
 
-        if ($certThumbprint) {
-            # Use MSAL with certificate
-            $tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-            
-            $cert = Get-ChildItem "Cert:\LocalMachine\My\$certThumbprint"
-            $base64Thumbprint = [Convert]::ToBase64String($cert.GetCertHash())
-            
-            # Create JWT assertion for client credentials with cert
-            $now = [DateTimeOffset]::UtcNow
-            $header = @{ alg = "RS256"; typ = "JWT"; x5t = $base64Thumbprint } | ConvertTo-Json -Compress
-            $payload = @{
-                aud = $tokenEndpoint
-                iss = $ClientId
-                sub = $ClientId
-                jti = [Guid]::NewGuid().ToString()
-                nbf = $now.ToUnixTimeSeconds()
-                exp = $now.AddMinutes(10).ToUnixTimeSeconds()
-            } | ConvertTo-Json -Compress
-            
-            $headerB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($header)).TrimEnd('=').Replace('+','-').Replace('/','_')
-            $payloadB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)).TrimEnd('=').Replace('+','-').Replace('/','_')
-            $dataToSign = "$headerB64.$payloadB64"
-            
-            $rsaProvider = $cert.PrivateKey
-            $signedBytes = $rsaProvider.SignData([Text.Encoding]::UTF8.GetBytes($dataToSign), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
-            $signatureB64 = [Convert]::ToBase64String($signedBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-            
-            $clientAssertion = "$dataToSign.$signatureB64"
-            
-            $body = @{
-                client_id = $ClientId
-                scope = $Scope
-                client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-                client_assertion = $clientAssertion
-                grant_type = "client_credentials"
-            }
-            
-            $response = Invoke-RestMethod -Uri $tokenEndpoint -Method POST -Body $body -ContentType "application/x-www-form-urlencoded"
-            return $response.access_token
+        if ($cert) {
+            Write-Log "Found client certificate: Subject=$($cert.Subject), Thumbprint=$($cert.Thumbprint), Expires=$($cert.NotAfter)"
+            return $cert
         }
+        Write-Log "No valid client certificate found (issuer: $CertIssuerMatch)" "WARN"
     }
     catch {
-        Write-Log "Certificate-based auth failed: $_" "WARN"
+        Write-Log "Error searching for client certificate: $_" "ERROR"
     }
-    
-    # Method 2: Fallback to managed identity if running in Azure/hybrid
-    try {
-        $imdsUrl = "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=api://chrome-policy-manager"
-        $response = Invoke-RestMethod -Uri $imdsUrl -Headers @{Metadata="true"} -ErrorAction Stop
-        return $response.access_token
-    }
-    catch {
-        Write-Log "Managed identity auth not available: $_" "WARN"
-    }
-    
     return $null
 }
 
@@ -156,11 +111,11 @@ try {
     }
     Write-Log "Device ID: $deviceId"
     
-    # Get access token
-    $token = Get-AccessToken
-    if (-not $token) {
-        Write-Log "Cannot acquire access token - skipping API check, using local manifest" "WARN"
-        # If we can't reach the API, check if we have any policy applied
+    # Get client certificate for mTLS authentication
+    $clientCert = Get-ClientCertificate
+    if (-not $clientCert) {
+        Write-Log "Cannot find client certificate - device may not have the CPM cert profile applied" "WARN"
+        # If we can't authenticate, check if we have any policy applied locally
         $localHash = Get-CurrentPolicyHash
         if ($localHash) {
             Write-Log "Local policy hash exists: $localHash - assuming compliant"
@@ -169,14 +124,13 @@ try {
         }
         else {
             Write-Log "No local policy hash - non-compliant"
-            Write-Output "Non-compliant (no policies applied and cannot reach API)"
+            Write-Output "Non-compliant (no policies applied and cannot authenticate)"
             exit 1
         }
     }
     
     # Call API to get effective policy (with ETag for bandwidth optimization)
     $headers = @{
-        Authorization = "Bearer $token"
         "Content-Type" = "application/json"
     }
     
@@ -196,7 +150,7 @@ try {
     
     while ($retryCount -le $MaxRetries) {
         try {
-            $response = Invoke-WebRequest -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -UseBasicParsing
+            $response = Invoke-WebRequest -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -UseBasicParsing -Certificate $clientCert
             
             if ($response.StatusCode -eq 304) {
                 # Policy hasn't changed — device is compliant

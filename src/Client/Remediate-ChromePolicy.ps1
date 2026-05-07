@@ -26,15 +26,16 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-# API Gateway (APIM) — device traffic goes through the gateway for auth/rate-limiting
+# API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
 $ApiGatewayUrl = "https://cpm-dev-apim.azure-api.net"
 # Direct backend (fallback if APIM not yet deployed)
 $ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
 # Use APIM gateway when available
 $ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
-$TenantId = "46b06a5e-8f7a-467b-bc9a-e776011fbb57"
-$ClientId = "91c07a6b-d678-48d0-b3fa-f0828aca761b"
-$Scope = "api://633d147e-7e43-42b1-abd7-15853f4a8b4b/.default"
+
+# Client certificate configuration (issued by Intune PKCS/SCEP profile)
+$CertIssuerMatch = "CN=CPM-Device-CA"  # Issuer CN of the Root CA that signs device certs
+$CertSubjectPrefix = "CN="             # Device certs have CN=<deviceId>
 
 # Retry/jitter settings
 $MaxRetries = 3
@@ -91,53 +92,22 @@ function Get-ChromeVersion {
     return "Unknown"
 }
 
-function Get-AccessToken {
-    # Same auth logic as detection script
+function Get-ClientCertificate {
+    # Find the client certificate issued by the CPM Root CA (deployed via Intune PKCS/SCEP)
     try {
-        $certThumbprint = (Get-ChildItem Cert:\LocalMachine\My | 
-            Where-Object { $_.Subject -match "CN=.*" -and $_.Issuer -match "MS-Organization-Access" } |
-            Select-Object -First 1).Thumbprint
+        $cert = Get-ChildItem Cert:\LocalMachine\My |
+            Where-Object { $_.Issuer -match $CertIssuerMatch -and $_.NotAfter -gt (Get-Date) } |
+            Sort-Object NotAfter -Descending |
+            Select-Object -First 1
 
-        if ($certThumbprint) {
-            $tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-            $cert = Get-ChildItem "Cert:\LocalMachine\My\$certThumbprint"
-            $base64Thumbprint = [Convert]::ToBase64String($cert.GetCertHash())
-            
-            $now = [DateTimeOffset]::UtcNow
-            $header = @{ alg = "RS256"; typ = "JWT"; x5t = $base64Thumbprint } | ConvertTo-Json -Compress
-            $payload = @{
-                aud = $tokenEndpoint
-                iss = $ClientId
-                sub = $ClientId
-                jti = [Guid]::NewGuid().ToString()
-                nbf = $now.ToUnixTimeSeconds()
-                exp = $now.AddMinutes(10).ToUnixTimeSeconds()
-            } | ConvertTo-Json -Compress
-            
-            $headerB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($header)).TrimEnd('=').Replace('+','-').Replace('/','_')
-            $payloadB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)).TrimEnd('=').Replace('+','-').Replace('/','_')
-            $dataToSign = "$headerB64.$payloadB64"
-            
-            $rsaProvider = $cert.PrivateKey
-            $signedBytes = $rsaProvider.SignData([Text.Encoding]::UTF8.GetBytes($dataToSign), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
-            $signatureB64 = [Convert]::ToBase64String($signedBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-            
-            $clientAssertion = "$dataToSign.$signatureB64"
-            
-            $body = @{
-                client_id = $ClientId
-                scope = $Scope
-                client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-                client_assertion = $clientAssertion
-                grant_type = "client_credentials"
-            }
-            
-            $response = Invoke-RestMethod -Uri $tokenEndpoint -Method POST -Body $body -ContentType "application/x-www-form-urlencoded"
-            return $response.access_token
+        if ($cert) {
+            Write-Log "Found client certificate: Subject=$($cert.Subject), Thumbprint=$($cert.Thumbprint)"
+            return $cert
         }
+        Write-Log "No valid client certificate found (issuer: $CertIssuerMatch)" "WARN"
     }
     catch {
-        Write-Log "Certificate-based auth failed: $_" "WARN"
+        Write-Log "Error searching for client certificate: $_" "ERROR"
     }
     return $null
 }
@@ -246,7 +216,7 @@ function Remove-StaleKeys {
 
 function Send-ComplianceReport {
     param(
-        [string]$Token,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
         [string]$DeviceId,
         [string]$DeviceName,
         [string]$PolicyHash,
@@ -258,7 +228,6 @@ function Send-ComplianceReport {
     
     try {
         $headers = @{
-            Authorization = "Bearer $Token"
             "Content-Type" = "application/json"
         }
         
@@ -275,7 +244,7 @@ function Send-ComplianceReport {
             policyKeysRemoved = $KeysRemoved
         } | ConvertTo-Json
         
-        Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/report" -Headers $headers -Method POST -Body $report | Out-Null
+        Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/report" -Headers $headers -Method POST -Body $report -Certificate $ClientCert | Out-Null
         Write-Log "Compliance report sent successfully"
     }
     catch {
@@ -296,22 +265,21 @@ try {
     $deviceName = Get-DeviceName
     Write-Log "Device: $deviceName ($deviceId)"
     
-    # Authenticate
-    $token = Get-AccessToken
-    if (-not $token) {
-        Write-Log "Cannot acquire access token" "ERROR"
-        Write-Output "FAILED: Cannot acquire access token"
+    # Authenticate with client certificate
+    $clientCert = Get-ClientCertificate
+    if (-not $clientCert) {
+        Write-Log "Cannot find client certificate" "ERROR"
+        Write-Output "FAILED: Cannot find client certificate (CPM cert profile not applied)"
         exit 1
     }
-    Write-Log "Authentication successful"
+    Write-Log "Client certificate found: $($clientCert.Thumbprint)"
     
     # Get effective policy from API
     $headers = @{
-        Authorization = "Bearer $token"
         "Content-Type" = "application/json"
     }
     
-    $effectivePolicy = Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET
+    $effectivePolicy = Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$deviceId/effective-policy" -Headers $headers -Method GET -Certificate $clientCert
     
     if (-not $effectivePolicy) {
         Write-Log "No effective policy returned from API" "WARN"
@@ -402,7 +370,7 @@ try {
     
     # Report back to API
     $errorsJson = if ($errors.Count -gt 0) { $errors | ConvertTo-Json -Compress } else { $null }
-    Send-ComplianceReport -Token $token -DeviceId $deviceId -DeviceName $deviceName `
+    Send-ComplianceReport -ClientCert $clientCert -DeviceId $deviceId -DeviceName $deviceName `
         -PolicyHash $serverHash -Status $status -Errors $errorsJson `
         -KeysWritten $keysWritten -KeysRemoved $keysRemoved
     

@@ -54,4 +54,37 @@ public class GraphService : IGraphService
             return new List<string>();
         }
     }
+
+    public async Task<List<EntraGroupInfo>> SearchGroupsAsync(string query, int top = 10)
+    {
+        try
+        {
+            var result = await _graphClient.Groups.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"startsWith(displayName, '{query.Replace("'", "''")}')";
+                config.QueryParameters.Top = top;
+                config.QueryParameters.Select = ["id", "displayName", "description", "groupTypes", "securityEnabled"];
+                config.QueryParameters.Orderby = ["displayName"];
+                config.Headers.Add("ConsistencyLevel", "eventual");
+                config.QueryParameters.Count = true;
+            });
+
+            var groups = new List<EntraGroupInfo>();
+            if (result?.Value != null)
+            {
+                foreach (var g in result.Value)
+                {
+                    var groupType = g.SecurityEnabled == true ? "Security" : 
+                        (g.GroupTypes?.Contains("Unified") == true ? "Microsoft 365" : "Distribution");
+                    groups.Add(new EntraGroupInfo(g.Id!, g.DisplayName ?? "", g.Description, groupType));
+                }
+            }
+            return groups;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to search groups with query '{Query}'", query);
+            return [];
+        }
+    }
 }

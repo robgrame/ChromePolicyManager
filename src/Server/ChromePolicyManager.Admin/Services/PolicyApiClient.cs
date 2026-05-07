@@ -145,6 +145,15 @@ public class PolicyApiClient
             new { policyName, value });
         response.EnsureSuccessStatusCode();
     }
+
+    // === Groups ===
+    public async Task<List<EntraGroupDto>> SearchGroupsAsync(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
+            return [];
+        return await _http.GetFromJsonAsync<List<EntraGroupDto>>(
+            $"/api/groups/search?q={Uri.EscapeDataString(query)}", JsonOptions) ?? [];
+    }
 }
 
 // === DTOs ===
@@ -260,6 +269,14 @@ public class CatalogImportResultDto
     public int Removed { get; set; }
     public int Updated { get; set; }
     public List<string> Warnings { get; set; } = [];
+}
+
+public class EntraGroupDto
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string? Description { get; set; }
+    public string? GroupType { get; set; }
 }
 
 public class AddToPolicySetResult

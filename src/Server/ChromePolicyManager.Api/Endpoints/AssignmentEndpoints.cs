@@ -38,6 +38,15 @@ public static class AssignmentEndpoints
             var deleted = await service.DeleteAssignmentAsync(id);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).WithName("DeleteAssignment");
+
+        // Group search endpoint for autocomplete
+        app.MapGet("/api/groups/search", async (string q, int? top, IGraphService graphService) =>
+        {
+            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+                return Results.Ok(Array.Empty<object>());
+            var groups = await graphService.SearchGroupsAsync(q, top ?? 10);
+            return Results.Ok(groups);
+        }).WithName("SearchEntraGroups").WithTags("Groups");
     }
 }
 
