@@ -60,6 +60,18 @@ else
                                                                    Color="Color.Success" OnClick="@(() => PromoteVersion(v))"
                                                                    Title="Promote to Active" />
                                                 }
+                                                @if (v.Status == PolicyVersionStatus.Archived)
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
+                                                                   Color="Color.Warning" OnClick="@(() => RollbackToVersion(policy, v))"
+                                                                   Title="Rollback to this version" />
+                                                }
+                                                @if (v.Status == PolicyVersionStatus.Active)
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Filled.GroupAdd" Size="Size.Small"
+                                                                   Color="Color.Primary" OnClick="@(() => AssignToGroup(policy, v))"
+                                                                   Title="Assign to Entra Group" />
+                                                }
                                                 <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
                                                                OnClick="@(() => ViewSettings(v))" Title="View Settings" />
                                             </td>
@@ -121,6 +133,39 @@ else
             await LoadPolicies();
         }
         catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task RollbackToVersion(PolicySetDto policy, PolicySetVersionDto version)
+    {
+        var confirm = await DialogService.ShowMessageBox("Rollback",
+            $"Reactivate version {version.Version}? The current active version will be archived.",
+            yesText: "Rollback", cancelText: "Cancel");
+        if (confirm == true)
+        {
+            try
+            {
+                var response = await Api.RollbackVersionAsync(policy.Id, version.Id);
+                Snackbar.Add($"Rolled back to version {version.Version}!", Severity.Success);
+                await LoadPolicies();
+            }
+            catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        }
+    }
+
+    private async Task AssignToGroup(PolicySetDto policy, PolicySetVersionDto version)
+    {
+        var parameters = new DialogParameters
+        {
+            ["PolicySetName"] = policy.Name,
+            ["PolicySetVersionId"] = version.Id,
+            ["VersionLabel"] = version.Version
+        };
+        var dialog = await DialogService.ShowAsync<CreateAssignmentDialog>(
+            $"Assign \"{policy.Name}\" v{version.Version}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            Snackbar.Add("Assignment created!", Severity.Success);
     }
 
     private async Task ViewSettings(PolicySetVersionDto version)

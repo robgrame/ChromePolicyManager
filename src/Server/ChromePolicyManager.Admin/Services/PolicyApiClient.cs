@@ -46,6 +46,13 @@ public class PolicyApiClient
         return (await response.Content.ReadFromJsonAsync<PolicySetVersionDto>(JsonOptions))!;
     }
 
+    public async Task<PolicySetVersionDto> RollbackVersionAsync(Guid policySetId, Guid targetVersionId)
+    {
+        var response = await _http.PostAsync($"/api/policies/{policySetId}/rollback/{targetVersionId}", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<PolicySetVersionDto>(JsonOptions))!;
+    }
+
     // === Assignments ===
     public async Task<List<AssignmentDto>> GetAssignmentsAsync()
     {

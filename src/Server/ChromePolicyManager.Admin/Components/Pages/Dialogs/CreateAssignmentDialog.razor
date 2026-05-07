@@ -3,19 +3,29 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">Create Assignment</MudText>
+        <MudText Typo="Typo.h6">Assign Policy to Group</MudText>
     </TitleContent>
     <DialogContent>
-        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Assign a policy version to an Entra ID group. Lower priority numbers take precedence.
-        </MudAlert>
+        @if (!string.IsNullOrEmpty(PolicySetName))
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                Assigning <strong>@PolicySetName</strong> v@VersionLabel to an Entra ID group.
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                Assign a policy version to an Entra ID group. Lower priority numbers take precedence.
+            </MudAlert>
+            <MudTextField @bind-Value="_policySetVersionId" Label="Policy Version ID" Required="true" Variant="Variant.Outlined"
+                          Placeholder="GUID of the active policy version" Class="mb-3" />
+        }
 
         <MudTextField @bind-Value="_entraGroupId" Label="Entra Group ID" Required="true" Variant="Variant.Outlined"
-                      Placeholder="GUID of the Entra security group" Class="mb-3" />
+                      Placeholder="GUID of the Entra security group" Class="mb-3"
+                      HelperText="Find group IDs in Entra ID → Groups" />
         <MudTextField @bind-Value="_groupName" Label="Group Display Name" Required="true" Variant="Variant.Outlined"
-                      Placeholder="e.g. MSLABS - Test" Class="mb-3" />
-        <MudTextField @bind-Value="_policySetVersionId" Label="Policy Version ID" Required="true" Variant="Variant.Outlined"
-                      Placeholder="GUID of the active policy version" Class="mb-3" />
+                      Placeholder="e.g. CPM - All Chrome Devices" Class="mb-3" />
         <MudNumericField @bind-Value="_priority" Label="Priority" Variant="Variant.Outlined" Min="1" Max="9999"
                          HelperText="Lower number = higher priority (wins on conflict)" Class="mb-3" />
         <MudSelect @bind-Value="_scope" Label="Scope" Variant="Variant.Outlined"
@@ -33,6 +43,9 @@
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string? PolicySetName { get; set; }
+    [Parameter] public Guid? PolicySetVersionId { get; set; }
+    [Parameter] public string? VersionLabel { get; set; }
 
     private string _entraGroupId = "";
     private string _groupName = "";
@@ -40,15 +53,22 @@
     private int _priority = 100;
     private int _scope = 0;
 
+    protected override void OnInitialized()
+    {
+        if (PolicySetVersionId.HasValue)
+            _policySetVersionId = PolicySetVersionId.Value.ToString();
+    }
+
     private bool IsValid => !string.IsNullOrWhiteSpace(_entraGroupId) &&
                             !string.IsNullOrWhiteSpace(_groupName) &&
-                            Guid.TryParse(_policySetVersionId, out _);
+                            (PolicySetVersionId.HasValue || Guid.TryParse(_policySetVersionId, out _));
 
     private async Task Submit()
     {
         try
         {
-            await Api.CreateAssignmentAsync(Guid.Parse(_policySetVersionId), _entraGroupId, _groupName, _priority, _scope);
+            var versionId = PolicySetVersionId ?? Guid.Parse(_policySetVersionId);
+            await Api.CreateAssignmentAsync(versionId, _entraGroupId, _groupName, _priority, _scope);
             Snackbar.Add($"Assignment to '{_groupName}' created!", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
