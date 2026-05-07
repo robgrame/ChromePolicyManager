@@ -10,16 +10,17 @@ using ChromePolicyManager.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Database - SQLite for development, SQL Server for production
-if (builder.Environment.IsDevelopment())
+// Database - SQL Server when connection string is configured, SQLite as fallback for local dev
+var sqlConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (!string.IsNullOrEmpty(sqlConnectionString))
 {
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseSqlite("Data Source=chromepolicymanager.db"));
+        options.UseSqlServer(sqlConnectionString));
 }
 else
 {
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+        options.UseSqlite("Data Source=chromepolicymanager.db"));
 }
 
 // Microsoft Identity / Auth
