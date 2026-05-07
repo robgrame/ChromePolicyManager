@@ -37,7 +37,8 @@ public static class CatalogEndpoints
                 .Select(e => new
                 {
                     e.Id, e.Name, e.DisplayName, e.Category,
-                    e.DataType, e.IsRecommended, e.PolicyClass
+                    e.DataType, e.IsRecommended, e.PolicyClass,
+                    e.RegistryKey, e.RegistryValueName
                 })
                 .ToListAsync();
             return Results.Ok(entries);

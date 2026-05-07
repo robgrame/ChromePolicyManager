@@ -201,16 +201,16 @@ else if (_stats is null && !_loading)
     <MudTable Items="_filteredEntries" Hover="true" Dense="true" Striped="true" Loading="_loading"
               FixedHeader="true" Height="600px">
         <HeaderContent>
-            <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.DisplayName)">Policy</MudTableSortLabel></MudTh>
             <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.Category)">Category</MudTableSortLabel></MudTh>
             <MudTh>Type</MudTh>
             <MudTh>Scope</MudTh>
             <MudTh>Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Name">
-                <MudText Typo="Typo.body2" Style="font-weight:600;">@context.Name</MudText>
-                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@TruncateText(context.DisplayName, 80)</MudText>
+            <MudTd DataLabel="Policy">
+                <MudText Typo="Typo.body2" Style="font-weight:600;">@context.DisplayName</MudText>
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@context.RegistryKey\@context.RegistryValueName</MudText>
             </MudTd>
             <MudTd DataLabel="Category">
                 <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@context.Category</MudChip>
@@ -382,7 +382,7 @@ else if (_stats is null && !_loading)
             _filteredEntries = _filteredEntries.Where(e =>
                 e.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
                 e.DisplayName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
-                e.Description.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+                e.RegistryValueName.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (!string.IsNullOrEmpty(_selectedCategory))
             _filteredEntries = _filteredEntries.Where(e => e.Category == _selectedCategory).ToList();

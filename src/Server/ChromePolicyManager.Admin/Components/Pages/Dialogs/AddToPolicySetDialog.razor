@@ -3,12 +3,17 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">Add "@Entry.Name" to PolicySet</MudText>
+        <MudText Typo="Typo.h6">Add "@Entry.DisplayName" to PolicySet</MudText>
     </TitleContent>
     <DialogContent>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Type: @Entry.DataType | Scope: @(Entry.IsRecommended ? "Recommended" : "Mandatory")
+            <strong>@Entry.Name</strong> — @Entry.DataType | @(Entry.IsRecommended ? "Recommended" : "Mandatory")
         </MudAlert>
+
+        @* Registry path preview *@
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+            Registry: <code>@Entry.RegistryKey\@Entry.RegistryValueName</code>
+        </MudText>
         
         @if (!_creatingNew)
         {
@@ -36,16 +41,19 @@
             </MudStack>
         }
 
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Policy Value</MudText>
+
         @switch (Entry.DataType)
         {
             case "Boolean":
-                <MudSwitch @bind-Value="_boolValue" Label="@($"Enable {Entry.Name}")" Color="Color.Primary" />
+                <MudSwitch @bind-Value="_boolValue" Label="@(_boolValue ? "Enabled (registry value = 1)" : "Disabled (registry value = 0)")" Color="Color.Primary" />
                 break;
             case "Integer":
-                <MudNumericField @bind-Value="_intValue" Label="Value" Variant="Variant.Outlined" />
+                <MudNumericField @bind-Value="_intValue" Label="Value (DWORD)" Variant="Variant.Outlined" />
                 break;
             case "String":
-                <MudTextField @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="_stringValue" Label="Value (REG_SZ)" Variant="Variant.Outlined" />
                 break;
             case "Enum":
                 <MudSelect @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined">
@@ -57,9 +65,17 @@
                 break;
             case "List":
                 <MudTextField @bind-Value="_stringValue" Label="Values (one per line)" Lines="4" Variant="Variant.Outlined"
-                              HelperText="Enter list items separated by newlines" />
+                              HelperText="Each line becomes a separate registry entry" />
                 break;
         }
+
+        @* Show preview of what will be written *@
+        <MudPaper Class="pa-3 mt-3" Elevation="0" Style="background: var(--mud-palette-background-grey);">
+            <MudText Typo="Typo.caption" Color="Color.Secondary"><strong>Preview:</strong> This will write:</MudText>
+            <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                @GetRegistryPreview()
+            </MudText>
+        </MudPaper>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -107,6 +123,20 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private string GetRegistryPreview()
+    {
+        var path = $@"{Entry.RegistryKey}\{Entry.RegistryValueName}";
+        return Entry.DataType switch
+        {
+            "Boolean" => $"[{path}] = (DWORD) {(_boolValue ? 1 : 0)}",
+            "Integer" => $"[{path}] = (DWORD) {_intValue}",
+            "String" => $"[{path}] = (REG_SZ) \"{_stringValue}\"",
+            "Enum" => $"[{path}] = (DWORD) {_stringValue}",
+            "List" => $"[{path}\\1] = \"{_stringValue.Split('\n').FirstOrDefault()}\" ...",
+            _ => $"[{path}] = \"{_stringValue}\""
+        };
+    }
 
     private void Submit()
     {
