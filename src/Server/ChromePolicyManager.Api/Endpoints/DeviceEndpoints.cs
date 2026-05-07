@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Services;
 
 namespace ChromePolicyManager.Api.Endpoints;
@@ -54,5 +56,62 @@ public static class DeviceEndpoints
             var history = await service.GetDeviceHistoryAsync(deviceId, count ?? 20);
             return Results.Ok(history);
         }).WithName("GetDeviceHistory");
+
+        // Batch ingest device logs
+        group.MapPost("/{deviceId}/logs", async (string deviceId, [FromBody] DeviceLogBatchRequest request,
+            AppDbContext db) =>
+        {
+            if (request.Entries == null || request.Entries.Count == 0)
+                return Results.BadRequest("No log entries");
+
+            if (request.Entries.Count > 500)
+                return Results.BadRequest("Max 500 entries per batch");
+
+            var now = DateTime.UtcNow;
+            var logs = request.Entries.Select(e => new Models.DeviceLog
+            {
+                DeviceId = deviceId,
+                DeviceName = request.DeviceName ?? "",
+                ScriptType = request.ScriptType ?? "Unknown",
+                Level = e.Level ?? "INFO",
+                Message = e.Message ?? "",
+                ClientTimestamp = e.Timestamp,
+                ReceivedAt = now
+            }).ToList();
+
+            db.DeviceLogs.AddRange(logs);
+            await db.SaveChangesAsync();
+
+            return Results.Ok(new { Accepted = logs.Count });
+        }).WithName("IngestDeviceLogs");
+
+        // Query device logs (for admin UI)
+        group.MapGet("/{deviceId}/logs", async (string deviceId, AppDbContext db, int? count, string? level) =>
+        {
+            var query = db.DeviceLogs
+                .Where(l => l.DeviceId == deviceId)
+                .OrderByDescending(l => l.ClientTimestamp)
+                .AsQueryable();
+
+            if (!string.IsNullOrEmpty(level))
+                query = query.Where(l => l.Level == level.ToUpper());
+
+            var logs = await query.Take(count ?? 100).ToListAsync();
+            return Results.Ok(logs);
+        }).WithName("GetDeviceLogs");
     }
+}
+
+public record DeviceLogBatchRequest
+{
+    public string? DeviceName { get; init; }
+    public string? ScriptType { get; init; }
+    public List<DeviceLogEntry> Entries { get; init; } = [];
+}
+
+public record DeviceLogEntry
+{
+    public DateTime Timestamp { get; init; }
+    public string? Level { get; init; }
+    public string? Message { get; init; }
 }

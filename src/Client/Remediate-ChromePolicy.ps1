@@ -50,14 +50,55 @@ $ManifestHashValue = "PolicyHash"        # Hash of applied policy
 $ManifestVersionValue = "PolicyVersion"  # Version string
 $ManifestTimestamp = "LastApplied"       # Last application timestamp
 $LogPath = "$env:ProgramData\ChromePolicyManager\remediation.log"
+$MaxLogSizeMB = 5
+
+# Log buffer for batch upload
+$script:LogBuffer = [System.Collections.Generic.List[hashtable]]::new()
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] [$Level] $Message"
+    
+    # Write to local file
     $logDir = Split-Path $LogPath -Parent
     if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+    # Rotate if over max size
+    if ((Test-Path $LogPath) -and ((Get-Item $LogPath).Length / 1MB) -gt $MaxLogSizeMB) {
+        $archivePath = $LogPath -replace '\.log$', "-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+        Rename-Item $LogPath $archivePath -ErrorAction SilentlyContinue
+    }
     Add-Content -Path $LogPath -Value $logEntry -ErrorAction SilentlyContinue
+    
+    # Buffer for batch upload
+    $script:LogBuffer.Add(@{
+        timestamp = (Get-Date).ToUniversalTime().ToString("o")
+        level     = $Level
+        message   = $Message
+    })
+}
+
+function Send-LogBatch {
+    param(
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
+        [string]$DeviceId
+    )
+    if ($script:LogBuffer.Count -eq 0) { return }
+    try {
+        $body = @{
+            deviceName = $env:COMPUTERNAME
+            scriptType = "Remediation"
+            entries    = @($script:LogBuffer)
+        } | ConvertTo-Json -Depth 3 -Compress
+
+        Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/logs" `
+            -Method POST -Body $body -ContentType "application/json" `
+            -Certificate $ClientCert -TimeoutSec 10 -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [WARN] Log batch upload failed: $_" -ErrorAction SilentlyContinue
+    }
+}
 }
 
 function Get-DeviceId {
@@ -253,24 +294,30 @@ function Send-ComplianceReport {
 }
 
 # ============ Main Remediation Logic ============
+$script:ExitCode = 1
+$script:ClientCertForLog = $null
+$script:DeviceIdForLog = $null
+
 try {
     Write-Log "=== Remediation script started ==="
     
     $deviceId = Get-DeviceId
+    $script:DeviceIdForLog = $deviceId
     if (-not $deviceId) {
         Write-Log "Cannot determine device ID" "ERROR"
         Write-Output "FAILED: Cannot determine device ID"
-        exit 1
+        $script:ExitCode = 1; return
     }
     $deviceName = Get-DeviceName
     Write-Log "Device: $deviceName ($deviceId)"
     
     # Authenticate with client certificate
     $clientCert = Get-ClientCertificate
+    $script:ClientCertForLog = $clientCert
     if (-not $clientCert) {
         Write-Log "Cannot find client certificate" "ERROR"
         Write-Output "FAILED: Cannot find client certificate (CPM cert profile not applied)"
-        exit 1
+        $script:ExitCode = 1; return
     }
     Write-Log "Client certificate found: $($clientCert.Thumbprint)"
     
@@ -284,7 +331,7 @@ try {
     if (-not $effectivePolicy) {
         Write-Log "No effective policy returned from API" "WARN"
         Write-Output "No policies assigned"
-        exit 0
+        $script:ExitCode = 0; return
     }
     
     $serverHash = $effectivePolicy.hash
@@ -376,10 +423,18 @@ try {
     
     Write-Log "Remediation complete: $keysWritten written, $keysRemoved removed, Status: $status"
     Write-Output "SUCCESS: $keysWritten policies applied, $keysRemoved stale removed. Hash: $serverHash"
-    exit 0
+    $script:ExitCode = 0
 }
 catch {
     Write-Log "Remediation script error: $_" "ERROR"
     Write-Output "FAILED: $_"
-    exit 1
+    $script:ExitCode = 1
 }
+finally {
+    # Always send logs to server (best-effort)
+    if ($script:ClientCertForLog -and $script:DeviceIdForLog) {
+        Send-LogBatch -ClientCert $script:ClientCertForLog -DeviceId $script:DeviceIdForLog
+    }
+    Write-Log "Remediation script finished (exit: $($script:ExitCode))"
+}
+exit $script:ExitCode
