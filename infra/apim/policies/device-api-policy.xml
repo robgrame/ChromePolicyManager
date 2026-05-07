@@ -12,7 +12,7 @@
     <inbound>
         <base />
         
-        <!-- 1. Validate device client certificate against trusted Root CA -->
+        <!-- 1. Validate device client certificate against trusted Sub CA -->
         <validate-client-certificate 
             validate-revocation="false"
             validate-trust="true"
@@ -21,7 +21,7 @@
             ignore-error="false">
             <identities>
                 <identity
-                    thumbprint="{{device-ca-thumbprint}}" />
+                    thumbprint="A1BC56C613DB7C92E0E592794658BB2ECEBB4892" />
             </identities>
         </validate-client-certificate>
 

@@ -34,8 +34,8 @@ $ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
 $ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
 
 # Client certificate configuration (issued by Intune PKCS/SCEP profile)
-$CertIssuerMatch = "CN=CPM-Device-CA"  # Issuer CN of the Root CA that signs device certs
-$CertSubjectPrefix = "CN="             # Device certs have CN=<deviceId>
+$CertIssuerMatch = "CN=MSLABS-SUBCA01"  # Issuer CN of the Sub CA that signs device certs
+$CertSubjectPrefix = "CN="              # Device certs have CN=<deviceId>
 
 # Retry/jitter settings
 $MaxRetries = 3
