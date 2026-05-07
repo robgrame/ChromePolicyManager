@@ -80,6 +80,27 @@ public static class DeviceEndpoints
             }).ToList();
 
             db.DeviceLogs.AddRange(logs);
+
+            // Upsert DeviceState so device appears in dashboard on first check-in
+            var deviceState = await db.DeviceStates.FindAsync(deviceId);
+            if (deviceState == null)
+            {
+                deviceState = new Models.DeviceState
+                {
+                    DeviceId = deviceId,
+                    DeviceName = request.DeviceName ?? "",
+                    LastCheckIn = now,
+                    LastStatus = Models.DeviceComplianceStatus.Unknown
+                };
+                db.DeviceStates.Add(deviceState);
+            }
+            else
+            {
+                deviceState.LastCheckIn = now;
+                if (!string.IsNullOrEmpty(request.DeviceName))
+                    deviceState.DeviceName = request.DeviceName;
+            }
+
             await db.SaveChangesAsync();
 
             return Results.Ok(new { Accepted = logs.Count });

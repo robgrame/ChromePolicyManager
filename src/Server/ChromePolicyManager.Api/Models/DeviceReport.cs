@@ -23,7 +23,8 @@ public enum DeviceComplianceStatus
     NonCompliant,
     Error,
     Pending,
-    PartiallyApplied
+    PartiallyApplied,
+    Unknown
 }
 
 public class DeviceState
