@@ -42,6 +42,16 @@
         }
 
         <MudDivider Class="my-3" />
+
+        @if (!string.IsNullOrWhiteSpace(Entry.Description))
+        {
+            <MudExpansionPanels Class="mb-3" Elevation="0">
+                <MudExpansionPanel Text="Policy Description & Value Guidance" Dense="true" IsInitiallyExpanded="@(Entry.DataType is "String" or "Integer" or "List")">
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Entry.Description</MudText>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
+
         <MudText Typo="Typo.subtitle2" Class="mb-2">Policy Value</MudText>
 
         @switch (Entry.DataType)
@@ -50,10 +60,12 @@
                 <MudSwitch @bind-Value="_boolValue" Label="@(_boolValue ? "Enabled (registry value = 1)" : "Disabled (registry value = 0)")" Color="Color.Primary" />
                 break;
             case "Integer":
-                <MudNumericField @bind-Value="_intValue" Label="Value (DWORD)" Variant="Variant.Outlined" />
+                <MudNumericField @bind-Value="_intValue" Label="Value (DWORD)" Variant="Variant.Outlined"
+                                 HelperText="Enter a numeric value as specified in the policy description" />
                 break;
             case "String":
-                <MudTextField @bind-Value="_stringValue" Label="Value (REG_SZ)" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="_stringValue" Label="Value (REG_SZ)" Variant="Variant.Outlined"
+                              HelperText="See policy description above for expected format" />
                 break;
             case "Enum":
                 <MudSelect @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined">
