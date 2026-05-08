@@ -21,7 +21,34 @@ public class GraphService : IGraphService
     {
         try
         {
-            var memberOf = await _graphClient.Devices[deviceId].MemberOf.GetAsync();
+            // The deviceId from dsregcmd is the Entra device registration ID, NOT the object ID.
+            // Graph API Devices[x].MemberOf requires the object ID, so we must resolve it first.
+            string objectId = deviceId;
+
+            // Try to resolve by deviceId filter (Entra registration ID → object ID)
+            if (Guid.TryParse(deviceId, out _))
+            {
+                var devices = await _graphClient.Devices.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"deviceId eq '{deviceId}'";
+                    config.QueryParameters.Select = ["id", "displayName", "deviceId"];
+                    config.QueryParameters.Top = 1;
+                });
+
+                if (devices?.Value != null && devices.Value.Count > 0)
+                {
+                    objectId = devices.Value[0].Id!;
+                    _logger.LogInformation("Resolved deviceId {DeviceId} to objectId {ObjectId} ({DisplayName})",
+                        deviceId, objectId, devices.Value[0].DisplayName);
+                }
+                else
+                {
+                    _logger.LogWarning("Device {DeviceId} not found in Entra ID", deviceId);
+                    return new List<string>();
+                }
+            }
+
+            var memberOf = await _graphClient.Devices[objectId].MemberOf.GetAsync();
             var groupIds = new List<string>();
 
             if (memberOf?.Value != null)
@@ -45,7 +72,8 @@ public class GraphService : IGraphService
                 });
             await pageIterator.IterateAsync();
 
-            _logger.LogInformation("Device {DeviceId} is member of {Count} groups", deviceId, groupIds.Count);
+            _logger.LogInformation("Device {DeviceId} (objectId={ObjectId}) is member of {Count} groups",
+                deviceId, objectId, groupIds.Count);
             return groupIds.Distinct().ToList();
         }
         catch (Exception ex)
