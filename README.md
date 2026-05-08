@@ -60,6 +60,7 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 | **Policy Validation** | Schema-based validation of policy values against known Chrome policy types |
 | **Intune Delivery** | Proactive Remediation hourly check → detect drift → apply policies via registry |
 | **Inline Remediation** | Detection script optionally remediates drift without waiting for Intune remediation cycle |
+| **Push Remediation Trigger** | Optional Windows-style push: cycle assignment group devices and invoke on-demand remediation commands (batched) |
 | **Audit Trail** | Full audit logging for all policy changes and device interactions |
 
 ## 🏗️ Project Structure
@@ -164,8 +165,10 @@ The deployment script automatically creates a Proactive Remediation in Intune th
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/assignments` | List all assignments |
-| `POST` | `/api/assignments` | Create group assignment (priority + scope) |
+| `POST` | `/api/assignments` | Create group assignment (priority + scope + optional push remediation) |
 | `PUT` | `/api/assignments/{id}/priority` | Update assignment priority |
+| `PUT` | `/api/assignments/{id}/push-remediation` | Enable/disable push remediation for assignment (optional immediate trigger) |
+| `POST` | `/api/assignments/{id}/push-remediation/trigger` | Manually trigger push remediation command dispatch |
 | `DELETE` | `/api/assignments/{id}` | Remove assignment |
 | `GET` | `/api/groups/search` | Search Entra ID groups (for assignment UI) |
 

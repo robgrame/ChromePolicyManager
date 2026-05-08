@@ -60,14 +60,31 @@ public class PolicyApiClient
     }
 
     public async Task<AssignmentDto> CreateAssignmentAsync(Guid policySetVersionId, string entraGroupId, 
-        string groupName, int priority, int scope)
+        string groupName, int priority, int scope, bool pushRemediationEnabled)
     {
         var response = await _http.PostAsJsonAsync("/api/assignments", new
         {
-            policySetVersionId, entraGroupId, groupName, priority, scope
+            policySetVersionId, entraGroupId, groupName, priority, scope, pushRemediationEnabled
         });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
+    }
+
+    public async Task<AssignmentDto> UpdateAssignmentPushRemediationAsync(Guid assignmentId, bool enabled, bool triggerNow)
+    {
+        var response = await _http.PutAsJsonAsync($"/api/assignments/{assignmentId}/push-remediation", new
+        {
+            enabled, triggerNow
+        });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
+    }
+
+    public async Task<PushRemediationDispatchResultDto> TriggerAssignmentPushRemediationAsync(Guid assignmentId)
+    {
+        var response = await _http.PostAsync($"/api/assignments/{assignmentId}/push-remediation/trigger", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<PushRemediationDispatchResultDto>(JsonOptions))!;
     }
 
     public async Task DeleteAssignmentAsync(Guid id)
@@ -202,7 +219,18 @@ public class AssignmentDto
     public int Priority { get; set; }
     public int Scope { get; set; } // 0=Mandatory, 1=Recommended
     public bool Enabled { get; set; }
+    public bool PushRemediationEnabled { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public class PushRemediationDispatchResultDto
+{
+    public bool Skipped { get; set; }
+    public string Message { get; set; } = "";
+    public int TotalDevices { get; set; }
+    public int CommandsSent { get; set; }
+    public int CommandsFailed { get; set; }
+    public int BatchesProcessed { get; set; }
 }
 
 public class MonitoringDashboardDto

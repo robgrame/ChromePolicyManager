@@ -55,6 +55,12 @@
             <MudSelectItem Value="0">Mandatory</MudSelectItem>
             <MudSelectItem Value="1">Recommended</MudSelectItem>
         </MudSelect>
+
+        <MudCheckBox @bind-Value="_pushRemediationEnabled" Class="mt-3"
+                     Label="Enable Windows-style push remediation notifications" />
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            When policy is served/updated, run remediation commands for all devices in the group (batched).
+        </MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -73,6 +79,7 @@
     private string _policySetVersionId = "";
     private int _priority = 100;
     private int _scope = 0;
+    private bool _pushRemediationEnabled;
 
     protected override void OnInitialized()
     {
@@ -108,7 +115,7 @@
         try
         {
             var versionId = PolicySetVersionId ?? Guid.Parse(_policySetVersionId);
-            await Api.CreateAssignmentAsync(versionId, _selectedGroup.Id, _selectedGroup.DisplayName, _priority, _scope);
+            await Api.CreateAssignmentAsync(versionId, _selectedGroup.Id, _selectedGroup.DisplayName, _priority, _scope, _pushRemediationEnabled);
             Snackbar.Add($"Assignment to '{_selectedGroup.DisplayName}' created!", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }

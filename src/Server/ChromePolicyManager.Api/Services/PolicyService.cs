@@ -11,11 +11,13 @@ public class PolicyService
 {
     private readonly AppDbContext _db;
     private readonly AuditService _audit;
+    private readonly PushRemediationService _pushRemediation;
 
-    public PolicyService(AppDbContext db, AuditService audit)
+    public PolicyService(AppDbContext db, AuditService audit, PushRemediationService pushRemediation)
     {
         _db = db;
         _audit = audit;
+        _pushRemediation = pushRemediation;
     }
 
     public async Task<PolicySet> CreatePolicySetAsync(string name, string description, string? actor = null)
@@ -80,6 +82,8 @@ public class PolicyService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("PolicyVersion.Promoted", actor, "PolicySetVersion", versionId.ToString(),
             $"Version {version.Version} promoted to Active");
+
+        await TriggerPushRemediationForVersionAsync(version.Id, $"Version {version.Version} promoted", actor);
         return version;
     }
 
@@ -98,6 +102,8 @@ public class PolicyService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("PolicyVersion.Rollback", actor, "PolicySetVersion", targetVersionId.ToString(),
             $"Rolled back to version {target.Version}");
+
+        await TriggerPushRemediationForVersionAsync(target.Id, $"Rolled back to version {target.Version}", actor);
         return target;
     }
 
@@ -180,5 +186,17 @@ public class PolicyService
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         return Convert.ToHexStringLower(bytes);
+    }
+
+    private async Task TriggerPushRemediationForVersionAsync(Guid policySetVersionId, string reason, string? actor)
+    {
+        var assignments = await _db.PolicyAssignments
+            .Where(a => a.PolicySetVersionId == policySetVersionId && a.Enabled && a.PushRemediationEnabled)
+            .ToListAsync();
+
+        foreach (var assignment in assignments)
+        {
+            await _pushRemediation.DispatchToAssignmentAsync(assignment, reason, actor);
+        }
     }
 }
