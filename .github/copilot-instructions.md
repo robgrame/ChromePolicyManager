@@ -11,7 +11,7 @@ The Azure subscription enforces the following security policies via Azure Policy
 ## Architecture Constraints
 
 - **SQL Server**: Must be accessed via Private Endpoint. The App Service must have VNet integration enabled to reach SQL over the private link.
-- **Service Bus**: Optional — `disableLocalAuth: true` (MI only), `publicNetworkAccess: Disabled`. Requires Standard tier + Private Endpoint (adds ~€10/month). The API code has a built-in fallback to synchronous processing when Service Bus is not configured. Set `deployServiceBus=true` in Bicep params only when async processing is needed.
+- **Service Bus**: Basic tier with `disableLocalAuth: true` (MI only, no SAS — policy compliant). Private Endpoints require Premium (~€670/month), not viable for dev. Public network access remains enabled on SB but auth is locked to Managed Identity only. For production at scale, evaluate Premium tier or Storage Queue (supports PE on Standard at ~€0.05/month).
 - **API Gateway (APIM)**: Handles external device traffic with mTLS client certificate auth.
 - **App Services**: Must use VNet integration to access backend resources over private endpoints. `vnetRouteAllEnabled: true` ensures all outbound traffic goes through VNet.
 
