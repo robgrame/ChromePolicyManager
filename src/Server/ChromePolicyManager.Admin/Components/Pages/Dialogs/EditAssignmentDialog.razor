@@ -1,0 +1,118 @@
+@inject PolicyApiClient Api
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Assignment</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            Editing assignment for <strong>@Assignment.GroupName</strong>
+        </MudAlert>
+
+        <MudAutocomplete T="EntraGroupDto" Label="Entra Group" Variant="Variant.Outlined"
+                         SearchFunc="SearchGroupsAsync" ToStringFunc="@(g => g?.DisplayName ?? "")"
+                         Value="_selectedGroup" ValueChanged="OnGroupSelected"
+                         Placeholder="Type group name to search..." Class="mb-3"
+                         MinCharacters="2" DebounceInterval="300" MaxItems="10"
+                         Dense="true" ShowProgressIndicator="true">
+            <ItemTemplate>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Small" Color="Color.Primary" />
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2"><b>@context.DisplayName</b></MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.GroupType — @(context.Description ?? context.Id)</MudText>
+                    </MudStack>
+                </MudStack>
+            </ItemTemplate>
+            <NoItemsTemplate>
+                <MudText Typo="Typo.body2" Class="pa-2">No groups found</MudText>
+            </NoItemsTemplate>
+        </MudAutocomplete>
+
+        @if (_selectedGroup != null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="mb-3">
+                ID: @_selectedGroup.Id
+            </MudText>
+        }
+
+        <MudNumericField @bind-Value="_priority" Label="Priority" Variant="Variant.Outlined" Min="1" Max="9999"
+                         HelperText="Lower number = higher priority (wins on conflict)" Class="mb-3" />
+        <MudSelect @bind-Value="_scope" Label="Scope" Variant="Variant.Outlined"
+                   HelperText="Mandatory → HKLM\...\Chrome, Recommended → ...\Chrome\Recommended">
+            <MudSelectItem Value="0">Mandatory</MudSelectItem>
+            <MudSelectItem Value="1">Recommended</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit"
+                   Disabled="@(!IsValid)">Save Changes</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public AssignmentDto Assignment { get; set; } = null!;
+
+    private EntraGroupDto? _selectedGroup;
+    private int _priority;
+    private int _scope;
+
+    protected override void OnInitialized()
+    {
+        _priority = Assignment.Priority;
+        _scope = Assignment.Scope;
+        _selectedGroup = new EntraGroupDto
+        {
+            Id = Assignment.EntraGroupId,
+            DisplayName = Assignment.GroupName
+        };
+    }
+
+    private bool IsValid => _selectedGroup != null;
+
+    private async Task<IEnumerable<EntraGroupDto>> SearchGroupsAsync(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length < 2)
+            return [];
+        try { return await Api.SearchGroupsAsync(value); }
+        catch { return []; }
+    }
+
+    private void OnGroupSelected(EntraGroupDto? group)
+    {
+        _selectedGroup = group;
+    }
+
+    private async Task Submit()
+    {
+        if (_selectedGroup == null) return;
+        try
+        {
+            // Only send changed fields
+            string? entraGroupId = _selectedGroup.Id != Assignment.EntraGroupId ? _selectedGroup.Id : null;
+            string? groupName = entraGroupId != null ? _selectedGroup.DisplayName : null;
+            int? priority = _priority != Assignment.Priority ? _priority : null;
+            int? scope = _scope != Assignment.Scope ? _scope : null;
+
+            if (entraGroupId == null && priority == null && scope == null)
+            {
+                Snackbar.Add("No changes detected", Severity.Info);
+                MudDialog.Cancel();
+                return;
+            }
+
+            await Api.UpdateAssignmentAsync(Assignment.Id, entraGroupId, groupName, priority, scope);
+            Snackbar.Add("Assignment updated!", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

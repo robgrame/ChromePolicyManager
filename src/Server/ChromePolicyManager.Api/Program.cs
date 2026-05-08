@@ -83,12 +83,25 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 
-// Auto-migrate database in development
-if (app.Environment.IsDevelopment())
+// Auto-migrate database schema additions
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    if (app.Environment.IsDevelopment())
+    {
+        db.Database.EnsureCreated();
+    }
+    // Add columns that may not exist yet (idempotent)
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('DeviceStates') AND name = 'ScriptVersion')
+                ALTER TABLE DeviceStates ADD ScriptVersion NVARCHAR(50) NULL;
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('DeviceReports') AND name = 'ScriptVersion')
+                ALTER TABLE DeviceReports ADD ScriptVersion NVARCHAR(50) NULL;
+        ");
+    }
+    catch { /* Column may already exist or DB not ready */ }
 }
 
 if (app.Environment.IsDevelopment())

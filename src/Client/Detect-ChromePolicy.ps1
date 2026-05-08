@@ -25,6 +25,9 @@
 
 $ErrorActionPreference = "Stop"
 
+# Script version — reported to server for fleet-wide visibility
+$ScriptVersion = "10"
+
 # Configuration
 # API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
 $ApiGatewayUrl = "https://cpm-dev-apim2.azure-api.net"
@@ -123,6 +126,7 @@ function Send-LogBatch {
             osBuild = $di.OsBuild
             manufacturer = $di.Manufacturer
             model = $di.Model
+            scriptVersion = $ScriptVersion
             entries    = @($script:LogBuffer)
         } | ConvertTo-Json -Depth 3 -Compress
 
@@ -277,6 +281,7 @@ function Send-ComplianceReport {
             appliedPolicyHash = $PolicyHash; status = $Status; errors = $Errors
             chromeVersion = $di.ChromeVersion; osVersion = $di.OsVersion
             osBuild = $di.OsBuild; manufacturer = $di.Manufacturer; model = $di.Model
+            scriptVersion = $ScriptVersion
             policyKeysWritten = $KeysWritten; policyKeysRemoved = $KeysRemoved
         } | ConvertTo-Json
         Invoke-RestMethod -Uri "$ApiBaseUrl/api/devices/$DeviceId/report" -Method POST -Body $report `

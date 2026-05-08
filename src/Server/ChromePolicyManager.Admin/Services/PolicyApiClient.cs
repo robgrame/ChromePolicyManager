@@ -53,6 +53,17 @@ public class PolicyApiClient
         return (await response.Content.ReadFromJsonAsync<PolicySetVersionDto>(JsonOptions))!;
     }
 
+    public async Task DeletePolicySetAsync(Guid id)
+    {
+        var response = await _http.DeleteAsync($"/api/policies/{id}");
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(error);
+        }
+        response.EnsureSuccessStatusCode();
+    }
+
     // === Assignments ===
     public async Task<List<AssignmentDto>> GetAssignmentsAsync()
     {
@@ -65,6 +76,17 @@ public class PolicyApiClient
         var response = await _http.PostAsJsonAsync("/api/assignments", new
         {
             policySetVersionId, entraGroupId, groupName, priority, scope, pushRemediationEnabled
+        });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
+    }
+
+    public async Task<AssignmentDto> UpdateAssignmentAsync(Guid assignmentId, string? entraGroupId, 
+        string? groupName, int? priority, int? scope)
+    {
+        var response = await _http.PutAsJsonAsync($"/api/assignments/{assignmentId}", new
+        {
+            entraGroupId, groupName, priority, scope
         });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
@@ -255,6 +277,7 @@ public class DeviceStateDto
     public string? OsBuild { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public string? ScriptVersion { get; set; }
     public DateTime LastContact { get; set; }
     public int PolicyKeysWritten { get; set; }
     public int PolicyKeysRemoved { get; set; }

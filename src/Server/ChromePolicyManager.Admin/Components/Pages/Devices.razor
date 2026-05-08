@@ -27,6 +27,7 @@
                     <MudTh>Chrome</MudTh>
                     <MudTh>OS</MudTh>
                     <MudTh>Model</MudTh>
+                    <MudTh>Script</MudTh>
                     <MudTh>Keys Applied</MudTh>
                     <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.LastContact)">Last Contact</MudTableSortLabel></MudTh>
                     <MudTh>Errors</MudTh>
@@ -68,6 +69,9 @@
                         {
                             <MudText>—</MudText>
                         }
+                    </MudTd>
+                    <MudTd>
+                        <MudText Typo="Typo.caption" Style="font-family: monospace;">@(context.ScriptVersion ?? "—")</MudText>
                     </MudTd>
                     <MudTd>
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">

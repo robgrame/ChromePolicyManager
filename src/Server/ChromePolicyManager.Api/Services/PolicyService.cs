@@ -182,6 +182,27 @@ public class PolicyService
         return new { HasDraft = true, Version = draft.Version, Settings = draft.SettingsJson, Count = settings.Count };
     }
 
+    public async Task<bool> DeletePolicySetAsync(Guid policySetId, string? actor = null)
+    {
+        var policySet = await _db.PolicySets
+            .Include(p => p.Versions)
+            .FirstOrDefaultAsync(p => p.Id == policySetId);
+        if (policySet == null) return false;
+
+        // Check if any version has active assignments
+        var versionIds = policySet.Versions.Select(v => v.Id).ToList();
+        var hasAssignments = await _db.PolicyAssignments
+            .AnyAsync(a => versionIds.Contains(a.PolicySetVersionId));
+        if (hasAssignments)
+            throw new InvalidOperationException("Cannot delete a policy set that has active assignments. Remove all assignments first.");
+
+        _db.PolicySetVersions.RemoveRange(policySet.Versions);
+        _db.PolicySets.Remove(policySet);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("PolicySet.Deleted", actor, "PolicySet", policySetId.ToString(), $"Name: {policySet.Name}");
+        return true;
+    }
+
     private static string ComputeHash(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));

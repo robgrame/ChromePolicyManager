@@ -31,6 +31,8 @@ else
                         <CardHeaderActions>
                             <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" 
                                            OnClick="@(() => OpenVersionDialog(policy))" Title="Add Version" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                                           OnClick="@(() => DeletePolicySet(policy))" Title="Delete Policy Set" />
                         </CardHeaderActions>
                     </MudCardHeader>
                     <MudCardContent>
@@ -166,6 +168,23 @@ else
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)
             Snackbar.Add("Assignment created!", Severity.Success);
+    }
+
+    private async Task DeletePolicySet(PolicySetDto policy)
+    {
+        var confirm = await DialogService.ShowMessageBox("Delete Policy Set",
+            $"Delete \"{policy.Name}\" and all its versions? This cannot be undone.\nAssignments must be removed first.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirm == true)
+        {
+            try
+            {
+                await Api.DeletePolicySetAsync(policy.Id);
+                Snackbar.Add($"Policy set '{policy.Name}' deleted", Severity.Success);
+                await LoadPolicies();
+            }
+            catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        }
     }
 
     private async Task ViewSettings(PolicySetVersionDto version)

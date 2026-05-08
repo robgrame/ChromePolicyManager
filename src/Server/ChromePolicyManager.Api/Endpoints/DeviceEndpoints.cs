@@ -95,7 +95,8 @@ public static class DeviceEndpoints
                     OsVersion = request.OsVersion,
                     OsBuild = request.OsBuild,
                     Manufacturer = request.Manufacturer,
-                    Model = request.Model
+                    Model = request.Model,
+                    ScriptVersion = request.ScriptVersion
                 };
                 db.DeviceStates.Add(deviceState);
             }
@@ -114,6 +115,8 @@ public static class DeviceEndpoints
                     deviceState.Manufacturer = request.Manufacturer;
                 if (!string.IsNullOrEmpty(request.Model))
                     deviceState.Model = request.Model;
+                if (!string.IsNullOrEmpty(request.ScriptVersion))
+                    deviceState.ScriptVersion = request.ScriptVersion;
             }
 
             await db.SaveChangesAsync();
@@ -147,6 +150,7 @@ public record DeviceLogBatchRequest
     public string? OsBuild { get; init; }
     public string? Manufacturer { get; init; }
     public string? Model { get; init; }
+    public string? ScriptVersion { get; init; }
     public List<DeviceLogEntry> Entries { get; init; } = [];
 }
 

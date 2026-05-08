@@ -28,6 +28,12 @@ public static class AssignmentEndpoints
             return Results.Created($"/api/assignments/{assignment.Id}", assignment);
         }).WithName("CreateAssignment");
 
+        group.MapPut("/{id:guid}", async (Guid id, [FromBody] UpdateAssignmentRequest request, AssignmentService service) =>
+        {
+            var assignment = await service.UpdateAssignmentAsync(id, request.EntraGroupId, request.GroupName, request.Priority, request.Scope);
+            return assignment is null ? Results.NotFound() : Results.Ok(assignment);
+        }).WithName("UpdateAssignment");
+
         group.MapPut("/{id:guid}/priority", async (Guid id, [FromBody] UpdatePriorityRequest request, AssignmentService service) =>
         {
             var assignment = await service.UpdatePriorityAsync(id, request.Priority);
@@ -73,3 +79,4 @@ public record CreateAssignmentRequest(
 
 public record UpdatePriorityRequest(int Priority);
 public record UpdatePushRemediationRequest(bool Enabled, bool TriggerNow = false);
+public record UpdateAssignmentRequest(string? EntraGroupId, string? GroupName, int? Priority, PolicyScope? Scope);

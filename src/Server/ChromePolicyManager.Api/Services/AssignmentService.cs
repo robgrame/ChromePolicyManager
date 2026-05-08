@@ -69,6 +69,40 @@ public class AssignmentService
         return true;
     }
 
+    public async Task<PolicyAssignment?> UpdateAssignmentAsync(
+        Guid assignmentId, string? entraGroupId, string? groupName,
+        int? priority, PolicyScope? scope, string? actor = null)
+    {
+        var assignment = await _db.PolicyAssignments.FindAsync(assignmentId);
+        if (assignment == null) return null;
+
+        var changes = new List<string>();
+        if (entraGroupId != null && entraGroupId != assignment.EntraGroupId)
+        {
+            changes.Add($"Group: {assignment.GroupName} → {groupName}");
+            assignment.EntraGroupId = entraGroupId;
+            assignment.GroupName = groupName ?? entraGroupId;
+        }
+        if (priority.HasValue && priority.Value != assignment.Priority)
+        {
+            changes.Add($"Priority: {assignment.Priority} → {priority.Value}");
+            assignment.Priority = priority.Value;
+        }
+        if (scope.HasValue && scope.Value != assignment.Scope)
+        {
+            changes.Add($"Scope: {assignment.Scope} → {scope.Value}");
+            assignment.Scope = scope.Value;
+        }
+
+        if (changes.Count > 0)
+        {
+            await _db.SaveChangesAsync();
+            await _audit.LogAsync("Assignment.Updated", actor, "PolicyAssignment", assignmentId.ToString(),
+                string.Join("; ", changes));
+        }
+        return assignment;
+    }
+
     public async Task<PolicyAssignment?> UpdatePriorityAsync(Guid assignmentId, int newPriority, string? actor = null)
     {
         var assignment = await _db.PolicyAssignments.FindAsync(assignmentId);

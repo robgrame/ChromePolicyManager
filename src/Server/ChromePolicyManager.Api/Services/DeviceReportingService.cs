@@ -29,6 +29,7 @@ public class DeviceReportingService
             OsBuild = request.OsBuild,
             Manufacturer = request.Manufacturer,
             Model = request.Model,
+            ScriptVersion = request.ScriptVersion,
             PolicyKeysWritten = request.PolicyKeysWritten,
             PolicyKeysRemoved = request.PolicyKeysRemoved,
             ReportedAt = DateTime.UtcNow
@@ -56,6 +57,8 @@ public class DeviceReportingService
         deviceState.OsBuild = request.OsBuild;
         deviceState.Manufacturer = request.Manufacturer;
         deviceState.Model = request.Model;
+        if (!string.IsNullOrEmpty(request.ScriptVersion))
+            deviceState.ScriptVersion = request.ScriptVersion;
 
         await _db.SaveChangesAsync();
         return report;
@@ -129,6 +132,7 @@ public class DeviceReportRequest
     public string? OsBuild { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public string? ScriptVersion { get; set; }
     public int? PolicyKeysWritten { get; set; }
     public int? PolicyKeysRemoved { get; set; }
 }

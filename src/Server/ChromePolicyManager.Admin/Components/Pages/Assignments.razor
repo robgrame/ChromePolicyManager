@@ -55,6 +55,8 @@ else
                            Color="Color.Primary" />
             </MudTd>
             <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                               OnClick="@(() => EditAssignment(context))" Title="Edit" />
                 <MudIconButton Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Small" Color="Color.Primary"
                                OnClick="@(() => TriggerPushRemediation(context))"
                                Disabled="@(!context.PushRemediationEnabled)" />
@@ -82,6 +84,16 @@ else
     private async Task OpenCreateDialog()
     {
         var dialog = await DialogService.ShowAsync<CreateAssignmentDialog>("New Assignment",
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadAssignments();
+    }
+
+    private async Task EditAssignment(AssignmentDto assignment)
+    {
+        var parameters = new DialogParameters { ["Assignment"] = assignment };
+        var dialog = await DialogService.ShowAsync<EditAssignmentDialog>("Edit Assignment", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)

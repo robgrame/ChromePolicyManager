@@ -15,6 +15,7 @@ public class DeviceReport
     public string? OsBuild { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public string? ScriptVersion { get; set; }
     public int? PolicyKeysWritten { get; set; }
     public int? PolicyKeysRemoved { get; set; }
     public DateTime ReportedAt { get; set; } = DateTime.UtcNow;
@@ -45,5 +46,6 @@ public class DeviceState
     public string? OsBuild { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public string? ScriptVersion { get; set; }
     public bool IsOffline => LastCheckIn.HasValue && DateTime.UtcNow - LastCheckIn.Value > TimeSpan.FromHours(24);
 }

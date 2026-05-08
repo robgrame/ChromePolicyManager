@@ -68,6 +68,19 @@ public static class PolicyEndpoints
             var settings = await service.GetDraftSettingsAsync(policySetId);
             return Results.Ok(settings);
         }).WithName("GetDraftSettings");
+
+        group.MapDelete("/{id:guid}", async (Guid id, PolicyService service) =>
+        {
+            try
+            {
+                var deleted = await service.DeletePolicySetAsync(id);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { Error = ex.Message });
+            }
+        }).WithName("DeletePolicySet");
     }
 }
 
