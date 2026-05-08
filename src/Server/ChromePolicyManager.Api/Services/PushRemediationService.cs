@@ -102,15 +102,6 @@ public class PushRemediationService
     {
         var deviceIds = new List<string>();
         var members = await _graphClient.Groups[groupId].Members.GetAsync(cancellationToken: ct);
-        if (members?.Value != null)
-        {
-            foreach (var item in members.Value)
-            {
-                if (item is Device d && !string.IsNullOrWhiteSpace(d.Id))
-                    deviceIds.Add(d.Id);
-            }
-        }
-
         if (members != null)
         {
             var iterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
