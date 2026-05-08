@@ -34,6 +34,33 @@ public class PushRemediationService
         _audit = audit;
     }
 
+    /// <summary>
+    /// Trigger on-demand proactive remediation for a single device by its Entra device ID.
+    /// </summary>
+    public async Task<PushRemediationDispatchResult> DispatchToDeviceAsync(
+        string entraDeviceId, string reason, string? actor = null, CancellationToken ct = default)
+    {
+        var scriptPolicyId = _configuration["PushRemediation:ScriptPolicyId"];
+        if (string.IsNullOrWhiteSpace(scriptPolicyId))
+        {
+            return new PushRemediationDispatchResult(true, "PushRemediation:ScriptPolicyId is not configured.", 0, 0, 0, 0);
+        }
+
+        var managedDeviceId = await ResolveManagedDeviceIdAsync(entraDeviceId, ct);
+        if (string.IsNullOrWhiteSpace(managedDeviceId))
+        {
+            return new PushRemediationDispatchResult(false, $"Could not resolve managed device for {entraDeviceId}.", 1, 0, 1, 0);
+        }
+
+        var success = await SendRemediationCommandAsync(managedDeviceId, scriptPolicyId, ct);
+        await _audit.LogAsync("PushRemediation.Device", actor, "Device", entraDeviceId,
+            $"Reason={reason}; ManagedDeviceId={managedDeviceId}; Success={success}");
+
+        return success
+            ? new PushRemediationDispatchResult(false, "Remediation triggered successfully.", 1, 1, 0, 1)
+            : new PushRemediationDispatchResult(false, "Failed to send remediation command.", 1, 0, 1, 1);
+    }
+
     public async Task<PushRemediationDispatchResult> DispatchToAssignmentAsync(
         PolicyAssignment assignment, string reason, string? actor = null, CancellationToken ct = default)
     {

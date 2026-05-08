@@ -31,6 +31,7 @@ public static class MonitoringEndpoints
                     d.OsBuild,
                     d.Manufacturer,
                     d.Model,
+                    d.ScriptVersion,
                     LastContact = d.LastCheckIn ?? DateTime.MinValue,
                     PolicyKeysWritten = 0,
                     PolicyKeysRemoved = 0
@@ -53,6 +54,7 @@ public static class MonitoringEndpoints
                 d.OsBuild,
                 d.Manufacturer,
                 d.Model,
+                d.ScriptVersion,
                 LastContact = d.LastCheckIn ?? DateTime.MinValue,
                 PolicyKeysWritten = 0,
                 PolicyKeysRemoved = 0
@@ -74,10 +76,20 @@ public static class MonitoringEndpoints
                 d.OsBuild,
                 d.Manufacturer,
                 d.Model,
+                d.ScriptVersion,
                 LastContact = d.LastCheckIn ?? DateTime.MinValue,
                 PolicyKeysWritten = 0,
                 PolicyKeysRemoved = 0
             }));
         }).WithName("GetErrorDevices");
+
+        // Trigger on-demand proactive remediation for a single device
+        group.MapPost("/devices/{deviceId}/trigger-remediation", async (string deviceId, PushRemediationService pushService) =>
+        {
+            var result = await pushService.DispatchToDeviceAsync(deviceId, "Manual trigger from admin UI", "Admin");
+            return result.Skipped
+                ? Results.BadRequest(new { result.Message })
+                : Results.Ok(new { result.Message, result.CommandsSent, result.CommandsFailed });
+        }).WithName("TriggerDeviceRemediation");
     }
 }

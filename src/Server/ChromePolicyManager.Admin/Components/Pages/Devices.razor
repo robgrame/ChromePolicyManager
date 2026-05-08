@@ -31,6 +31,7 @@
                     <MudTh>Keys Applied</MudTh>
                     <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.LastContact)">Last Contact</MudTableSortLabel></MudTh>
                     <MudTh>Errors</MudTh>
+                    <MudTh>Actions</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd>
@@ -90,6 +91,12 @@
                                 <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Size="Size.Small" />
                             </MudTooltip>
                         }
+                    </MudTd>
+                    <MudTd>
+                        <MudTooltip Text="Trigger on-demand remediation script">
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => TriggerDeviceRemediation(context))" />
+                        </MudTooltip>
                     </MudTd>
                 </RowTemplate>
             </MudTable>
@@ -251,5 +258,19 @@
     {
         if (string.IsNullOrEmpty(value)) return "—";
         return value.Length <= maxLength ? value : value[..maxLength] + "…";
+    }
+
+    private async Task TriggerDeviceRemediation(DeviceStateDto device)
+    {
+        try
+        {
+            var result = await Api.TriggerDeviceRemediationAsync(device.DeviceId);
+            Snackbar.Add($"{device.DeviceName}: {result.Message}", 
+                result.CommandsFailed > 0 ? Severity.Warning : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error triggering remediation for {device.DeviceName}: {ex.Message}", Severity.Error);
+        }
     }
 }

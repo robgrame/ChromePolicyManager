@@ -182,7 +182,7 @@ public class PolicyService
         return new { HasDraft = true, Version = draft.Version, Settings = draft.SettingsJson, Count = settings.Count };
     }
 
-    public async Task<bool> DeletePolicySetAsync(Guid policySetId, string? actor = null)
+    public async Task<bool> DeletePolicySetAsync(Guid policySetId, bool force = false, string? actor = null)
     {
         var policySet = await _db.PolicySets
             .Include(p => p.Versions)
@@ -191,10 +191,20 @@ public class PolicyService
 
         // Check if any version has active assignments
         var versionIds = policySet.Versions.Select(v => v.Id).ToList();
-        var hasAssignments = await _db.PolicyAssignments
-            .AnyAsync(a => versionIds.Contains(a.PolicySetVersionId));
-        if (hasAssignments)
-            throw new InvalidOperationException("Cannot delete a policy set that has active assignments. Remove all assignments first.");
+        var orphanedAssignments = await _db.PolicyAssignments
+            .Where(a => versionIds.Contains(a.PolicySetVersionId))
+            .ToListAsync();
+
+        if (orphanedAssignments.Count > 0)
+        {
+            if (!force)
+                throw new InvalidOperationException(
+                    $"Cannot delete: {orphanedAssignments.Count} assignment(s) reference this policy set. Use force delete to remove them.");
+
+            _db.PolicyAssignments.RemoveRange(orphanedAssignments);
+            await _audit.LogAsync("PolicySet.ForceDeleteAssignments", actor, "PolicySet", policySetId.ToString(),
+                $"Cascade-removed {orphanedAssignments.Count} assignment(s)");
+        }
 
         _db.PolicySetVersions.RemoveRange(policySet.Versions);
         _db.PolicySets.Remove(policySet);

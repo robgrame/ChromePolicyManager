@@ -69,11 +69,11 @@ public static class PolicyEndpoints
             return Results.Ok(settings);
         }).WithName("GetDraftSettings");
 
-        group.MapDelete("/{id:guid}", async (Guid id, PolicyService service) =>
+        group.MapDelete("/{id:guid}", async (Guid id, PolicyService service, bool? force) =>
         {
             try
             {
-                var deleted = await service.DeletePolicySetAsync(id);
+                var deleted = await service.DeletePolicySetAsync(id, force ?? false);
                 return deleted ? Results.NoContent() : Results.NotFound();
             }
             catch (InvalidOperationException ex)

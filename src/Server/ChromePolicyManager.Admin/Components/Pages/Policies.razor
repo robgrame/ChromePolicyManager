@@ -173,7 +173,7 @@ else
     private async Task DeletePolicySet(PolicySetDto policy)
     {
         var confirm = await DialogService.ShowMessageBox("Delete Policy Set",
-            $"Delete \"{policy.Name}\" and all its versions? This cannot be undone.\nAssignments must be removed first.",
+            $"Delete \"{policy.Name}\" and all its versions? This cannot be undone.",
             yesText: "Delete", cancelText: "Cancel");
         if (confirm == true)
         {
@@ -182,6 +182,23 @@ else
                 await Api.DeletePolicySetAsync(policy.Id);
                 Snackbar.Add($"Policy set '{policy.Name}' deleted", Severity.Success);
                 await LoadPolicies();
+            }
+            catch (InvalidOperationException)
+            {
+                // Has orphaned assignments — offer force delete
+                var forceConfirm = await DialogService.ShowMessageBox("Force Delete",
+                    $"This policy set has orphaned assignments that block deletion. Force delete will remove them too. Continue?",
+                    yesText: "Force Delete", cancelText: "Cancel");
+                if (forceConfirm == true)
+                {
+                    try
+                    {
+                        await Api.DeletePolicySetAsync(policy.Id, force: true);
+                        Snackbar.Add($"Policy set '{policy.Name}' force deleted with orphaned assignments", Severity.Success);
+                        await LoadPolicies();
+                    }
+                    catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+                }
             }
             catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
         }

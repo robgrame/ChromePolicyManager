@@ -53,9 +53,10 @@ public class PolicyApiClient
         return (await response.Content.ReadFromJsonAsync<PolicySetVersionDto>(JsonOptions))!;
     }
 
-    public async Task DeletePolicySetAsync(Guid id)
+    public async Task DeletePolicySetAsync(Guid id, bool force = false)
     {
-        var response = await _http.DeleteAsync($"/api/policies/{id}");
+        var url = force ? $"/api/policies/{id}?force=true" : $"/api/policies/{id}";
+        var response = await _http.DeleteAsync(url);
         if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
         {
             var error = await response.Content.ReadAsStringAsync();
@@ -130,6 +131,13 @@ public class PolicyApiClient
     public async Task<List<DeviceStateDto>> GetErrorDevicesAsync()
     {
         return await _http.GetFromJsonAsync<List<DeviceStateDto>>("/api/monitoring/errors", JsonOptions) ?? [];
+    }
+
+    public async Task<PushRemediationDispatchResultDto> TriggerDeviceRemediationAsync(string deviceId)
+    {
+        var response = await _http.PostAsync($"/api/monitoring/devices/{deviceId}/trigger-remediation", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<PushRemediationDispatchResultDto>(JsonOptions))!;
     }
 
     // === Catalog ===
