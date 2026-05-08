@@ -26,7 +26,7 @@
 $ErrorActionPreference = "Stop"
 
 # Script version — reported to server for fleet-wide visibility
-$ScriptVersion = "10"
+$ScriptVersion = "11"
 
 # Configuration
 # API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
