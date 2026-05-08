@@ -1,3 +1,4 @@
+@using System.Text.Json
 @inject PolicyApiClient Api
 @inject ISnackbar Snackbar
 
@@ -7,25 +8,136 @@
     </TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="_version" Label="Version" Required="true" Variant="Variant.Outlined"
-                      Placeholder="e.g. 1.0.0" Class="mb-3" />
-        
-        <MudText Typo="Typo.subtitle2" Class="mb-1">Chrome Policy Settings</MudText>
-        @if (_settingsCount > 0)
+                      Placeholder="e.g. 1.0.0" Class="mb-4" />
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.subtitle2">Chrome Policy Settings (@_currentSettings.Count)</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="ShowAddPolicy"
+                       Disabled="@_addingPolicy">
+                Add Policy
+            </MudButton>
+        </MudStack>
+
+        @if (_currentSettings.Any())
         {
-            <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">
-                @_settingsCount policies configured in this draft (added via catalog ➕ button)
-            </MudAlert>
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0" Class="mb-3"
+                            Style="max-height: 200px; overflow-y: auto;">
+                <thead>
+                    <tr>
+                        <th>Policy Name</th>
+                        <th>Value</th>
+                        <th style="width: 40px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _currentSettings)
+                    {
+                        <tr>
+                            <td>
+                                <MudText Typo="Typo.caption" Style="font-family: monospace;">@entry.Key</MudText>
+                            </td>
+                            <td>
+                                <MudText Typo="Typo.caption" Style="font-family: monospace;">@FormatValue(entry.Value)</MudText>
+                            </td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                               Color="Color.Error" OnClick="@(() => RemovePolicy(entry.Key))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
         }
         else
         {
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
-                Add policies from the Catalog page using the ➕ button, or edit the JSON below manually.
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                No policies configured yet. Use <strong>Add Policy</strong> to add Chrome policies with their values.
             </MudAlert>
         }
-        <MudTextField @bind-Value="_settingsJson" Label="Settings JSON" Variant="Variant.Outlined"
-                      Lines="12" Placeholder='{"PolicyName": value, ...}' Style="font-family: monospace;"
-                      HelperText="Auto-populated from catalog additions. You can also edit manually." />
-        
+
+        @if (_addingPolicy)
+        {
+            <MudPaper Elevation="1" Class="pa-3 mb-3" Style="border: 1px solid var(--mud-palette-primary);">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Add Chrome Policy</MudText>
+
+                @if (_loadingCatalog)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+                    <MudText Typo="Typo.caption">Loading policy catalog…</MudText>
+                }
+                else if (!_catalogEntries.Any())
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                        No policies in catalog. Import the Chrome policy catalog first from the Catalog page.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAutocomplete T="PolicyCatalogEntryDto"
+                                     @bind-Value="_selectedEntry"
+                                     Label="Search policies by name"
+                                     SearchFunc="SearchCatalog"
+                                     ToStringFunc="@(e => e is null ? "" : $"{e.DisplayName} ({e.DataType})")"
+                                     Variant="Variant.Outlined"
+                                     Class="mb-2"
+                                     ResetValueOnEmptyText="true"
+                                     Clearable="true"
+                                     MinCharacters="1" />
+
+                    @if (_selectedEntry is not null)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+                            Registry: <code>@_selectedEntry.RegistryKey\@_selectedEntry.RegistryValueName</code>
+                        </MudText>
+
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">Value</MudText>
+                        @switch (_selectedEntry.DataType)
+                        {
+                            case "Boolean":
+                                <MudSwitch @bind-Value="_boolValue"
+                                           Label="@(_boolValue ? "Enabled" : "Disabled")"
+                                           Color="Color.Primary" />
+                                break;
+                            case "Integer":
+                                <MudNumericField @bind-Value="_intValue" Label="Value (DWORD)" Variant="Variant.Outlined" />
+                                break;
+                            case "String":
+                                <MudTextField @bind-Value="_stringValue" Label="Value (REG_SZ)" Variant="Variant.Outlined" />
+                                break;
+                            case "Enum":
+                                <MudSelect @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined">
+                                    @foreach (var opt in ParseEnumOptions(_selectedEntry.EnumOptions ?? "[]"))
+                                    {
+                                        <MudSelectItem Value="@opt.Value">@opt.Display (@opt.Value)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                                break;
+                            case "List":
+                            case "MultiString":
+                                <MudTextField @bind-Value="_stringValue" Label="Values (one per line)" Lines="3"
+                                              Variant="Variant.Outlined"
+                                              HelperText="Each line becomes a separate registry entry" />
+                                break;
+                            default:
+                                <MudTextField @bind-Value="_stringValue" Label="Value" Variant="Variant.Outlined" />
+                                break;
+                        }
+                    }
+                }
+
+                <MudStack Row="true" Spacing="2" Class="mt-3">
+                    <MudButton Size="Size.Small" OnClick="CancelAddPolicy">Cancel</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               Disabled="@(_selectedEntry is null)"
+                               OnClick="ConfirmAddPolicy">
+                        Add to Version
+                    </MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+
         @if (_warnings.Any())
         {
             <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">
@@ -36,7 +148,7 @@
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit"
-                   Disabled="@(string.IsNullOrWhiteSpace(_version) || string.IsNullOrWhiteSpace(_settingsJson))">
+                   Disabled="@string.IsNullOrWhiteSpace(_version)">
             Create Version
         </MudButton>
     </DialogActions>
@@ -47,41 +159,114 @@
     [Parameter] public PolicySetDto? PolicySet { get; set; }
 
     private string _version = "";
-    private string _settingsJson = "";
-    private int _settingsCount;
     private List<string> _warnings = [];
+    private Dictionary<string, JsonElement> _currentSettings = new();
 
-    protected override void OnInitialized()
+    // Catalog
+    private List<PolicyCatalogEntryDto> _catalogEntries = [];
+    private bool _loadingCatalog;
+
+    // Add-policy inline form
+    private bool _addingPolicy;
+    private PolicyCatalogEntryDto? _selectedEntry;
+    private bool _boolValue = true;
+    private int _intValue;
+    private string _stringValue = "";
+
+    protected override async Task OnInitializedAsync()
     {
         if (PolicySet?.Versions.Any() == true)
         {
             var latest = PolicySet.Versions.OrderByDescending(v => v.CreatedAt).First();
-            _settingsJson = latest.SettingsJson;
-            _settingsCount = CountSettings(latest.SettingsJson);
-            // Suggest next version
+            _currentSettings = ParseSettings(latest.SettingsJson);
+
+            // Suggest next version number
             var parts = latest.Version.Split('.');
             if (parts.Length == 3 && int.TryParse(parts[2], out var patch))
                 _version = $"{parts[0]}.{parts[1]}.{patch + 1}";
         }
+
+        // Load catalog entries for the add-policy UI
+        _loadingCatalog = true;
+        try
+        {
+            _catalogEntries = await Api.GetCatalogAsync();
+        }
+        catch
+        {
+            // Non-fatal: catalog may not have been imported yet
+        }
+        finally
+        {
+            _loadingCatalog = false;
+        }
     }
 
-    private static int CountSettings(string json)
+    private static Dictionary<string, JsonElement> ParseSettings(string json)
     {
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            return doc.RootElement.EnumerateObject().Count();
+            return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? new();
         }
-        catch { return 0; }
+        catch { return new(); }
     }
+
+    private void ShowAddPolicy()
+    {
+        _addingPolicy = true;
+        _selectedEntry = null;
+        _boolValue = true;
+        _intValue = 0;
+        _stringValue = "";
+    }
+
+    private void CancelAddPolicy() => _addingPolicy = false;
+
+    private void RemovePolicy(string name) => _currentSettings.Remove(name);
+
+    private void ConfirmAddPolicy()
+    {
+        if (_selectedEntry is null) return;
+
+        object rawValue = _selectedEntry.DataType switch
+        {
+            "Boolean" => _boolValue ? 1 : 0,
+            "Integer" => _intValue,
+            "List" or "MultiString" => _stringValue.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            _ => _stringValue
+        };
+
+        _currentSettings[_selectedEntry.Name] = JsonSerializer.SerializeToElement(rawValue);
+        _addingPolicy = false;
+        _selectedEntry = null;
+    }
+
+    private Task<IEnumerable<PolicyCatalogEntryDto>> SearchCatalog(string text, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Task.FromResult<IEnumerable<PolicyCatalogEntryDto>>(_catalogEntries.Take(10));
+
+        var results = _catalogEntries
+            .Where(e => e.DisplayName.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                        e.Name.Contains(text, StringComparison.OrdinalIgnoreCase))
+            .Take(20);
+        return Task.FromResult<IEnumerable<PolicyCatalogEntryDto>>(results);
+    }
+
+    private static string FormatValue(JsonElement element) =>
+        JsonSerializer.Serialize(element);
 
     private async Task Submit()
     {
         try
         {
-            var result = await Api.CreateVersionAsync(PolicySet!.Id, _version, _settingsJson);
+            var settingsJson = _currentSettings.Any()
+                ? JsonSerializer.Serialize(_currentSettings, new JsonSerializerOptions { WriteIndented = true })
+                : "{}";
+
+            var result = await Api.CreateVersionAsync(PolicySet!.Id, _version, settingsJson);
             _warnings = result.Validation?.Warnings ?? [];
-            
+
             Snackbar.Add($"Version {_version} created (Status: Draft). Promote to activate.", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
@@ -92,4 +277,18 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private static List<(string Value, string Display)> ParseEnumOptions(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.EnumerateArray()
+                .Select(e => (
+                    Value: e.GetProperty("value").ToString(),
+                    Display: e.TryGetProperty("displayName", out var d) ? d.GetString() ?? "" : ""))
+                .ToList();
+        }
+        catch { return []; }
+    }
 }
