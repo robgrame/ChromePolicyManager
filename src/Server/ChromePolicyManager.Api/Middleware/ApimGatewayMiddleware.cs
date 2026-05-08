@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Identity.Web;
 
 namespace ChromePolicyManager.Api.Middleware;
@@ -45,6 +46,17 @@ public class ApimGatewayMiddleware
             return;
         }
 
+        // Explicitly authenticate if not already done (device endpoints don't have [Authorize],
+        // so ASP.NET Core may skip automatic authentication)
+        if (!(context.User?.Identity?.IsAuthenticated ?? false))
+        {
+            var authResult = await context.AuthenticateAsync();
+            if (authResult.Succeeded && authResult.Principal is not null)
+            {
+                context.User = authResult.Principal;
+            }
+        }
+
         // Validate APIM gateway identity
         var apimClientId = _configuration["ApimGateway:ClientId"];
         var apimPrincipalId = _configuration["ApimGateway:PrincipalId"];
@@ -82,9 +94,10 @@ public class ApimGatewayMiddleware
 
         if (!isApimIdentity)
         {
+            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
             _logger.LogWarning(
-                "Device endpoint called without valid APIM identity. Path: {Path}, IsAuthenticated: {IsAuth}",
-                path, context.User?.Identity?.IsAuthenticated ?? false);
+                "Device endpoint called without valid APIM identity. Path: {Path}, IsAuthenticated: {IsAuth}, AppId: {AppId}, ExpectedClientId: {Expected}, HasAuthHeader: {HasAuth}",
+                path, context.User?.Identity?.IsAuthenticated ?? false, appId ?? "(null)", apimClientId, !string.IsNullOrEmpty(authHeader));
 
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new
