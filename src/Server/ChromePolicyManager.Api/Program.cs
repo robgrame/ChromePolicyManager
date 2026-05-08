@@ -9,8 +9,6 @@ using ChromePolicyManager.Api.Services;
 using ChromePolicyManager.Api.Endpoints;
 using ChromePolicyManager.Api.Middleware;
 
-// Enable PII in token validation errors to see actual audience/issuer mismatches
-Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
 
 var builder = WebApplication.CreateBuilder(args);
 
