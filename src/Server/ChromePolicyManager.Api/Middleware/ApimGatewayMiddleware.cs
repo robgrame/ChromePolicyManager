@@ -58,6 +58,13 @@ public class ApimGatewayMiddleware
             else if (authResult.Failure is not null)
             {
                 _logger.LogWarning("Bearer token authentication failed: {Error}", authResult.Failure.Message);
+                // Log inner exception chain for audience/issuer mismatch diagnostics
+                var inner = authResult.Failure.InnerException;
+                while (inner != null)
+                {
+                    _logger.LogWarning("  Inner: {InnerError}", inner.Message);
+                    inner = inner.InnerException;
+                }
             }
         }
 

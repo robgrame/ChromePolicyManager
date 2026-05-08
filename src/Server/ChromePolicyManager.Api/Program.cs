@@ -9,6 +9,9 @@ using ChromePolicyManager.Api.Services;
 using ChromePolicyManager.Api.Endpoints;
 using ChromePolicyManager.Api.Middleware;
 
+// Enable PII in token validation errors to see actual audience/issuer mismatches
+Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Application Insights via OpenTelemetry
@@ -27,17 +30,26 @@ else
         options.UseSqlite("Data Source=chromepolicymanager.db"));
 }
 
-// Microsoft Identity / Auth — accept both v1 and v2 tokens (MI tokens may be v1)
+// Microsoft Identity / Auth — accept both v1 and v2 tokens from MI and interactive flows
 var tenantId = builder.Configuration["AzureAd:TenantId"];
+var clientId = builder.Configuration["AzureAd:ClientId"];
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
-builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+// PostConfigure runs AFTER Microsoft.Identity.Web's PostConfigure, ensuring our overrides stick
+builder.Services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
     Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
     options =>
     {
+        // Accept both v1 and v2 issuers (MI tokens may use either)
         options.TokenValidationParameters.ValidIssuers = new[]
         {
             $"https://sts.windows.net/{tenantId}/",
             $"https://login.microsoftonline.com/{tenantId}/v2.0"
+        };
+        // Accept both audience formats: v2 tokens use bare clientId, v1 use Application ID URI
+        options.TokenValidationParameters.ValidAudiences = new[]
+        {
+            clientId,
+            $"api://{clientId}"
         };
     });
 
