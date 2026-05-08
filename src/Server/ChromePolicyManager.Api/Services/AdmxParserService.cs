@@ -86,7 +86,7 @@ public class AdmxParserService
                           ?? strings.GetValueOrDefault($"{name}_Explain", "");
 
         // Determine data type from elements
-        var (dataType, enumOptions) = DetermineDataType(policy);
+        var (dataType, enumOptions) = DetermineDataType(policy, strings);
 
         // For recommended policies, use the base name without suffix
         var baseName = isRecommended && name.EndsWith("_recommended")
@@ -111,7 +111,7 @@ public class AdmxParserService
         };
     }
 
-    private (string DataType, string? EnumOptions) DetermineDataType(XElement policy)
+    private (string DataType, string? EnumOptions) DetermineDataType(XElement policy, Dictionary<string, string> strings)
     {
         var elements = policy.Element("elements");
 
@@ -126,7 +126,7 @@ public class AdmxParserService
 
         return firstChild.Name.LocalName switch
         {
-            "enum" => ("Enum", ParseEnumOptions(firstChild)),
+            "enum" => ("Enum", ParseEnumOptions(firstChild, strings)),
             "decimal" => ("Integer", null),
             "text" => ("String", null),
             "list" => ("List", null),
@@ -136,11 +136,12 @@ public class AdmxParserService
         };
     }
 
-    private string? ParseEnumOptions(XElement enumElement)
+    private string? ParseEnumOptions(XElement enumElement, Dictionary<string, string> strings)
     {
         var items = enumElement.Elements("item").Select(item =>
         {
             var displayNameRef = item.Attribute("displayName")?.Value;
+            var displayName = ResolveStringRef(displayNameRef, strings) ?? displayNameRef ?? "";
             var valueElement = item.Element("value")?.Element("decimal");
             var stringValue = item.Element("value")?.Element("string");
 
@@ -148,7 +149,7 @@ public class AdmxParserService
                 ? int.Parse(valueElement.Attribute("value")?.Value ?? "0")
                 : stringValue?.Value ?? "";
 
-            return new { displayName = displayNameRef ?? "", value };
+            return new { displayName, value };
         }).ToList();
 
         return items.Count > 0 ? JsonSerializer.Serialize(items) : null;

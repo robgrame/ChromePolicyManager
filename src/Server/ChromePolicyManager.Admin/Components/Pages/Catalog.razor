@@ -407,9 +407,11 @@ else if (_stats is null && !_loading)
 
     private async Task AddToPolicySet(PolicyCatalogEntryDto entry)
     {
+        // Fetch full entry (with EnumOptions, Description) before opening dialog
+        var fullEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
         var parameters = new DialogParameters<AddToPolicySetDialog>
         {
-            { x => x.Entry, entry },
+            { x => x.Entry, fullEntry },
             { x => x.PolicySets, _policySets },
             { x => x.Api, Api }
         };
