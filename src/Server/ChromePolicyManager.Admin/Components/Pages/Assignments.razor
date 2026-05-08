@@ -25,6 +25,7 @@ else
             <MudTh>Priority</MudTh>
             <MudTh>Policy Version</MudTh>
             <MudTh>Enabled</MudTh>
+            <MudTh>Push Remediation</MudTh>
             <MudTh>Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
@@ -48,6 +49,15 @@ else
                          Color="@(context.Enabled ? Color.Success : Color.Error)" Size="Size.Small" />
             </MudTd>
             <MudTd>
+                <MudSwitch T="bool"
+                           Value="@context.PushRemediationEnabled"
+                           ValueChanged="@((enabled) => TogglePushRemediation(context, enabled))"
+                           Color="Color.Primary" />
+            </MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Small" Color="Color.Primary"
+                               OnClick="@(() => TriggerPushRemediation(context))"
+                               Disabled="@(!context.PushRemediationEnabled)" />
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                OnClick="@(() => DeleteAssignment(context))" />
             </MudTd>
@@ -87,6 +97,35 @@ else
             await Api.DeleteAssignmentAsync(assignment.Id);
             Snackbar.Add("Assignment deleted", Severity.Success);
             await LoadAssignments();
+        }
+    }
+
+    private async Task TogglePushRemediation(AssignmentDto assignment, bool enabled)
+    {
+        try
+        {
+            var updated = await Api.UpdateAssignmentPushRemediationAsync(assignment.Id, enabled, triggerNow: enabled);
+            assignment.PushRemediationEnabled = updated.PushRemediationEnabled;
+            Snackbar.Add(enabled
+                ? $"Push remediation enabled for {assignment.GroupName}"
+                : $"Push remediation disabled for {assignment.GroupName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task TriggerPushRemediation(AssignmentDto assignment)
+    {
+        try
+        {
+            var result = await Api.TriggerAssignmentPushRemediationAsync(assignment.Id);
+            Snackbar.Add(result.Message, result.CommandsFailed > 0 ? Severity.Warning : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
     }
 }

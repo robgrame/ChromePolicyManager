@@ -41,6 +41,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<PolicyService>();
 builder.Services.AddScoped<AssignmentService>();
+builder.Services.AddScoped<PushRemediationService>();
 builder.Services.AddScoped<EffectivePolicyService>();
 builder.Services.AddScoped<DeviceReportingService>();
 builder.Services.AddScoped<IGraphService, GraphService>();

@@ -9,6 +9,7 @@ public class PolicyAssignment
     public int Priority { get; set; } = 100; // Lower number = higher priority
     public PolicyScope Scope { get; set; } = PolicyScope.Mandatory;
     public bool Enabled { get; set; } = true;
+    public bool PushRemediationEnabled { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? CreatedBy { get; set; }
 
