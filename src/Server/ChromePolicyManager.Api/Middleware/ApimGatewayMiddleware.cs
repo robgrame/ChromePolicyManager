@@ -55,6 +55,10 @@ public class ApimGatewayMiddleware
             {
                 context.User = authResult.Principal;
             }
+            else if (authResult.Failure is not null)
+            {
+                _logger.LogWarning("Bearer token authentication failed: {Error}", authResult.Failure.Message);
+            }
         }
 
         // Validate APIM gateway identity

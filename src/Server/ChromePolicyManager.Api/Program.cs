@@ -27,8 +27,19 @@ else
         options.UseSqlite("Data Source=chromepolicymanager.db"));
 }
 
-// Microsoft Identity / Auth
+// Microsoft Identity / Auth — accept both v1 and v2 tokens (MI tokens may be v1)
+var tenantId = builder.Configuration["AzureAd:TenantId"];
 builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
+builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+    Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
+    options =>
+    {
+        options.TokenValidationParameters.ValidIssuers = new[]
+        {
+            $"https://sts.windows.net/{tenantId}/",
+            $"https://login.microsoftonline.com/{tenantId}/v2.0"
+        };
+    });
 
 // Microsoft Graph client (uses Managed Identity in Azure, falls back to CLI locally)
 builder.Services.AddSingleton(sp =>
