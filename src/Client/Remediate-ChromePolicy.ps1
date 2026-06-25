@@ -51,6 +51,8 @@ $ManifestVersionValue = "PolicyVersion"  # Version string
 $ManifestTimestamp = "LastApplied"       # Last application timestamp
 $LogPath = "$env:ProgramData\ChromePolicyManager\remediation.log"
 $MaxLogSizeMB = 5
+# Cached copy of the last effective policy — used for offline registry verification.
+$CachedPolicyPath = "$env:ProgramData\ChromePolicyManager\effective-policy.json"
 
 # Log buffer for batch upload
 $script:LogBuffer = [System.Collections.Generic.List[hashtable]]::new()
@@ -200,48 +202,212 @@ function Set-ManagedKeys {
     Set-ItemProperty -Path $ManifestPath -Name $ManifestKeysValue -Value $json
 }
 
+# ============================================================================
+#  Chrome-faithful registry application & verification
+#  Modeled on Chromium components/policy/core/common/registry_dict.cc and
+#  policy_loader_win.cc. The Chrome policy loader:
+#   * Reads ONLY REG_SZ / REG_EXPAND_SZ / REG_DWORD. REG_QWORD, REG_MULTI_SZ
+#     and every other type are SILENTLY IGNORED -> we must never emit them.
+#   * Booleans -> REG_DWORD 0/1   (BOOLEAN schema also accepts "0"/"1").
+#   * Integers -> REG_DWORD       (INTEGER schema also accepts a numeric
+#                                   REG_SZ; values outside signed 32-bit are
+#                                   written as REG_SZ because there is no
+#                                   REG_QWORD support in Chrome).
+#   * Doubles  -> REG_SZ (invariant culture); coerced by the DOUBLE schema.
+#   * Strings  -> REG_SZ.
+#   * Lists of scalars -> a subkey named after the policy holding numbered
+#                         values "1".."N" (Chrome ignores non-numeric names).
+#   * Lists containing objects / Dictionaries -> a single REG_SZ holding
+#                         compact JSON (Chrome parses JSON strings for the
+#                         LIST/DICT schemas).
+#  Every write first clears BOTH a value and a subkey of the same name, so a
+#  change of shape (scalar <-> list <-> dict) never leaves stale data behind.
+# ============================================================================
+
+function Test-IsScalarValue {
+    param([object]$Value)
+    return ($Value -is [bool] -or $Value -is [string] -or $Value -is [int] -or
+            $Value -is [long] -or $Value -is [int16] -or $Value -is [byte] -or
+            $Value -is [double] -or $Value -is [single] -or $Value -is [decimal] -or
+            $Value -is [uint16] -or $Value -is [uint32] -or $Value -is [sbyte])
+}
+
+function Test-IsListValue {
+    param([object]$Value)
+    return (($Value -is [System.Array]) -or
+            (($Value -is [System.Collections.IEnumerable]) -and
+             -not ($Value -is [string]) -and
+             -not ($Value -is [System.Collections.IDictionary])))
+}
+
+function ConvertTo-ChromeScalar {
+    # Returns @{ Type='DWord'|'String'; Data=<value> } describing how this scalar
+    # should land in the registry so Chrome's loader can read it.
+    param([object]$Value)
+    if ($Value -is [bool]) { return @{ Type = 'DWord'; Data = [int][bool]$Value } }
+    if ($Value -is [int] -or $Value -is [int16] -or $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [uint16]) {
+        return @{ Type = 'DWord'; Data = [int]$Value }
+    }
+    if ($Value -is [long] -or $Value -is [uint32]) {
+        $l = [long]$Value
+        if ($l -ge [int]::MinValue -and $l -le [int]::MaxValue) { return @{ Type = 'DWord'; Data = [int]$l } }
+        # No REG_QWORD support -> numeric string (INTEGER schema coerces it).
+        return @{ Type = 'String'; Data = $l.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+    }
+    if ($Value -is [double] -or $Value -is [single] -or $Value -is [decimal]) {
+        return @{ Type = 'String'; Data = ([double]$Value).ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+    }
+    return @{ Type = 'String'; Data = [string]$Value }
+}
+
+function Remove-PolicyEntry {
+    # Remove any existing value AND subkey with this name (shape-conflict cleanup).
+    param([string]$BasePath, [string]$Name)
+    $subPath = Join-Path $BasePath $Name
+    if (Test-Path $subPath) { Remove-Item -Path $subPath -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $BasePath) {
+        $props = Get-ItemProperty -Path $BasePath -ErrorAction SilentlyContinue
+        if ($props -and ($props.PSObject.Properties.Name -contains $Name)) {
+            Remove-ItemProperty -Path $BasePath -Name $Name -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Write-RegistryPolicy {
-    param(
-        [string]$BasePath,
-        [string]$PolicyName,
-        [object]$Value
-    )
-    
-    # Ensure the base path exists
-    if (-not (Test-Path $BasePath)) {
-        New-Item -Path $BasePath -Force | Out-Null
+    param([string]$BasePath, [string]$PolicyName, [object]$Value)
+
+    if (-not (Test-Path $BasePath)) { New-Item -Path $BasePath -Force | Out-Null }
+
+    # Clear any previous representation so shape/type changes leave no stale data.
+    Remove-PolicyEntry -BasePath $BasePath -Name $PolicyName
+
+    if ($null -eq $Value) { return }
+
+    if (Test-IsScalarValue $Value) {
+        $s = ConvertTo-ChromeScalar $Value
+        New-ItemProperty -Path $BasePath -Name $PolicyName -Value $s.Data -PropertyType $s.Type -Force | Out-Null
+        return
     }
-    
-    # Determine registry value type and write accordingly
-    if ($Value -is [bool]) {
-        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value ([int]$Value) -Type DWord
-    }
-    elseif ($Value -is [int] -or $Value -is [long]) {
-        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value ([int]$Value) -Type DWord
-    }
-    elseif ($Value -is [string]) {
-        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $Value -Type String
-    }
-    elseif ($Value -is [array]) {
-        # Chrome list policies use numbered subkeys: Chrome\PolicyName\1, Chrome\PolicyName\2, ...
-        $listPath = Join-Path $BasePath $PolicyName
-        if (Test-Path $listPath) {
-            Remove-Item -Path $listPath -Recurse -Force
+
+    if (Test-IsListValue $Value) {
+        $items = @($Value)
+        $allScalar = $true
+        foreach ($it in $items) { if (-not (Test-IsScalarValue $it)) { $allScalar = $false; break } }
+        if ($allScalar) {
+            # Canonical Chrome list form: subkey with numbered REG_SZ/REG_DWORD values.
+            $listPath = Join-Path $BasePath $PolicyName
+            New-Item -Path $listPath -Force | Out-Null
+            for ($i = 0; $i -lt $items.Count; $i++) {
+                $s = ConvertTo-ChromeScalar $items[$i]
+                New-ItemProperty -Path $listPath -Name (($i + 1).ToString()) -Value $s.Data -PropertyType $s.Type -Force | Out-Null
+            }
         }
-        New-Item -Path $listPath -Force | Out-Null
-        for ($i = 0; $i -lt $Value.Count; $i++) {
-            Set-ItemProperty -Path $listPath -Name ($i + 1).ToString() -Value $Value[$i] -Type String
+        else {
+            # Complex list -> Chrome accepts a whole list encoded as a JSON string.
+            $json = ConvertTo-Json -InputObject $items -Compress -Depth 20
+            New-ItemProperty -Path $BasePath -Name $PolicyName -Value $json -PropertyType String -Force | Out-Null
+        }
+        return
+    }
+
+    # Dictionary / object -> Chrome accepts a JSON string for the DICT schema.
+    $json = $Value | ConvertTo-Json -Compress -Depth 20
+    New-ItemProperty -Path $BasePath -Name $PolicyName -Value $json -PropertyType String -Force | Out-Null
+}
+
+function Get-ScalarCanonical {
+    # Canonical token for a scalar already read from the registry (int or string).
+    param([object]$Value)
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [int16] -or $Value -is [byte] -or $Value -is [uint32]) {
+        return "i:$([long]$Value)"
+    }
+    return "s:$([string]$Value)"
+}
+
+function Get-IntendedCanonical {
+    # Canonical token for an intended value, mirroring Write-RegistryPolicy exactly.
+    param([object]$Value)
+    if ($null -eq $Value) { return '<null>' }
+    if (Test-IsScalarValue $Value) {
+        $s = ConvertTo-ChromeScalar $Value
+        if ($s.Type -eq 'DWord') { return "i:$([long]$s.Data)" }
+        return "s:$([string]$s.Data)"
+    }
+    if (Test-IsListValue $Value) {
+        $items = @($Value)
+        $allScalar = $true
+        foreach ($it in $items) { if (-not (Test-IsScalarValue $it)) { $allScalar = $false; break } }
+        if ($allScalar) {
+            $tokens = @()
+            foreach ($it in $items) {
+                $s = ConvertTo-ChromeScalar $it
+                if ($s.Type -eq 'DWord') { $tokens += "i:$([long]$s.Data)" } else { $tokens += "s:$([string]$s.Data)" }
+            }
+            return "L:[" + ($tokens -join ',') + "]"
+        }
+        return "s:$(ConvertTo-Json -InputObject $items -Compress -Depth 20)"
+    }
+    return "s:$($Value | ConvertTo-Json -Compress -Depth 20)"
+}
+
+function Read-AppliedPolicy {
+    # Reads a policy back the way Chrome's loader interprets the registry and
+    # returns @{ Found=$bool; Canonical=<token> }.
+    param([string]$BasePath, [string]$PolicyName)
+    $subPath = Join-Path $BasePath $PolicyName
+    if (Test-Path $subPath) {
+        $props = Get-ItemProperty -Path $subPath -ErrorAction SilentlyContinue
+        $tokens = @()
+        if ($props) {
+            $numeric = $props.PSObject.Properties | Where-Object { $_.Name -match '^\d+$' } | Sort-Object { [int]$_.Name }
+            foreach ($p in $numeric) { $tokens += (Get-ScalarCanonical $p.Value) }
+        }
+        return @{ Found = $true; Canonical = "L:[" + ($tokens -join ',') + "]" }
+    }
+    if (Test-Path $BasePath) {
+        $props = Get-ItemProperty -Path $BasePath -ErrorAction SilentlyContinue
+        if ($props -and ($props.PSObject.Properties.Name -contains $PolicyName)) {
+            return @{ Found = $true; Canonical = (Get-ScalarCanonical $props.$PolicyName) }
         }
     }
-    elseif ($Value -is [hashtable] -or $Value -is [PSCustomObject]) {
-        # Dictionary/complex policies stored as JSON string
-        $jsonValue = $Value | ConvertTo-Json -Compress -Depth 10
-        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $jsonValue -Type String
+    return @{ Found = $false; Canonical = $null }
+}
+
+function Test-PolicyApplied {
+    # True if the registry reflects the intended value the way Chrome reads it.
+    param([string]$BasePath, [string]$PolicyName, [object]$IntendedValue)
+    $actual = Read-AppliedPolicy -BasePath $BasePath -PolicyName $PolicyName
+    if (-not $actual.Found) { return $false }
+    return ($actual.Canonical -eq (Get-IntendedCanonical $IntendedValue))
+}
+
+function Test-AllPoliciesApplied {
+    # Verifies every policy in the effective-policy object is applied as Chrome
+    # would read it. Returns @{ Compliant=$bool; Mismatches=@(names) }.
+    param([object]$EffectivePolicy)
+    $mismatches = @()
+    if ($EffectivePolicy.mandatoryPolicies -is [PSCustomObject]) {
+        foreach ($p in $EffectivePolicy.mandatoryPolicies.PSObject.Properties) {
+            if (-not (Test-PolicyApplied -BasePath $ChromePolicyPath -PolicyName $p.Name -IntendedValue $p.Value)) { $mismatches += $p.Name }
+        }
     }
-    else {
-        # Fallback: store as string
-        Set-ItemProperty -Path $BasePath -Name $PolicyName -Value $Value.ToString() -Type String
+    if ($EffectivePolicy.recommendedPolicies -is [PSCustomObject]) {
+        foreach ($p in $EffectivePolicy.recommendedPolicies.PSObject.Properties) {
+            if (-not (Test-PolicyApplied -BasePath $ChromeRecommendedPath -PolicyName $p.Name -IntendedValue $p.Value)) { $mismatches += $p.Name }
+        }
     }
+    return @{ Compliant = ($mismatches.Count -eq 0); Mismatches = $mismatches }
+}
+
+function Save-CachedPolicy {
+    # Persist the full effective policy for offline registry verification.
+    param([object]$EffectivePolicy)
+    try {
+        $dir = Split-Path $CachedPolicyPath -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        ($EffectivePolicy | ConvertTo-Json -Depth 20 -Compress) | Set-Content -Path $CachedPolicyPath -Encoding UTF8
+    }
+    catch { Write-Log "Failed to cache effective policy: $_" "WARN" }
 }
 
 function Remove-StaleKeys {
@@ -437,6 +603,14 @@ try {
     if (-not (Test-Path $ManifestPath)) { New-Item -Path $ManifestPath -Force | Out-Null }
     Set-ItemProperty -Path $ManifestPath -Name $ManifestHashValue -Value $serverHash
     Set-ItemProperty -Path $ManifestPath -Name $ManifestTimestamp -Value (Get-Date -Format "o")
+
+    # Verify the registry reflects the intended policy the way Chrome reads it.
+    $verify = Test-AllPoliciesApplied -EffectivePolicy $effectivePolicy
+    if (-not $verify.Compliant) {
+        foreach ($m in $verify.Mismatches) { Write-Log "  VERIFY MISMATCH: $m" "WARN" }
+        $errors += "Post-apply verification failed for: $($verify.Mismatches -join ', ')"
+    }
+    Save-CachedPolicy -EffectivePolicy $effectivePolicy
     
     # Determine compliance status
     $status = if ($errors.Count -eq 0) { "Compliant" } 
