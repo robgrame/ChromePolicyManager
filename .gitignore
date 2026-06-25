@@ -41,3 +41,7 @@ Thumbs.db
 tools/
 *.zip
 publish/
+
+## Infra deployment artifacts
+infra/deployment-output-*.json
+infra/main.json

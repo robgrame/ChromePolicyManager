@@ -81,9 +81,11 @@ ChromePolicyManager/
 │       ├── Detect-ChromePolicy.ps1         # Intune detection script (supports inline remediation)
 │       └── Remediate-ChromePolicy.ps1      # Intune remediation script
 ├── infra/
-│   ├── Deploy-Infrastructure.ps1           # One-click Azure deployment
-│   ├── main.bicep                          # Infrastructure-as-Code (Bicep)
-│   ├── main.bicepparam                     # Bicep parameters
+│   ├── Deploy.ps1                          # Unified deploy: infra (Bicep) + code (API + Admin)
+│   ├── Deploy-Infrastructure.ps1           # Imperative az-CLI provisioning (alternative)
+│   ├── main.bicep                          # Infrastructure-as-Code (Bicep), dev/prod SKU tiers
+│   ├── main.dev.bicepparam                 # Dev parameters (cost-optimized SKUs)
+│   ├── main.prod.bicepparam                # Prod parameters (production-grade SKUs)
 │   └── apim/                               # API Management policies
 └── tools/                                  # ADMX template downloads (gitignored)
 ```
@@ -97,16 +99,41 @@ ChromePolicyManager/
 - `az` CLI authenticated
 - `gh` CLI (optional, for repo operations)
 
-### 1. Deploy Infrastructure
+### 1. Deploy Infrastructure + Code
+
+The unified `Deploy.ps1` script provisions the Azure infrastructure (Bicep) **and** builds/deploys the API + Admin code in one pass. SKUs are sized automatically per environment.
 
 ```powershell
 cd infra
-.\Deploy-Infrastructure.ps1
+
+# Dev (cost-optimized SKUs)
+.\Deploy.ps1 -EnvironmentName dev -ClientId <api-app-id> -ClientSecret (Read-Host -AsSecureString)
+
+# Prod (production-grade SKUs, Service Bus enabled)
+.\Deploy.ps1 -EnvironmentName prod -ClientId <api-app-id> -ClientSecret (Read-Host -AsSecureString)
+
+# Preview infra changes without applying (Bicep what-if)
+.\Deploy.ps1 -EnvironmentName prod -SkipCode -WhatIf
 ```
 
-This creates: Resource Group, SQL Server (Entra-only auth), App Service Plan (B1), Web Apps (API + Admin), Key Vault, Service Bus, API Management (Developer SKU), App Configuration.
+Useful switches: `-SkipInfra` (deploy code only), `-SkipCode` (deploy infra only), `-SubscriptionId`, `-Location`.
 
-> **Note:** The default Bicep deployment uses cost-optimized SKUs (SQL Basic 5 DTU, Service Bus Basic, App Configuration Free). For production at scale (100k+ devices), upgrade to the recommended SKUs listed in the [Scaling](#-scaling-to-100k-devices) section.
+This creates: Resource Group, VNet (App Service VNet integration), SQL Server (Private Endpoint, Entra-only auth), App Service Plan + Web Apps (API + Admin), Key Vault, App Configuration, API Management, Application Insights, and (prod) Service Bus with Private Endpoint.
+
+#### SKU tiers (dev vs prod)
+
+| Resource | `dev` | `prod` |
+|----------|-------|--------|
+| App Service Plan | B1 (Basic) | P1v3 ×2 (PremiumV3) |
+| SQL Database | Basic (5 DTU) | S2 (Standard, 50 DTU) |
+| API Management | Developer | Standard |
+| App Configuration | Free | Standard |
+| Service Bus | off by default | Standard (Private Endpoint) |
+| Log Analytics retention | 30 days | 90 days |
+
+The tier is selected by the `skuTier` Bicep parameter (defaults from `environmentName`) and the matching parameter files: `main.dev.bicepparam` / `main.prod.bicepparam`.
+
+> **Note:** `Deploy-Infrastructure.ps1` (imperative az-CLI variant) remains available for step-by-step provisioning without Bicep.
 
 ### 2. Import Chrome Policy Catalog
 

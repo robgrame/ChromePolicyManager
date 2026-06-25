@@ -34,11 +34,74 @@ param appSubnetPrefix string = '10.0.1.0/24'
 @description('Private Endpoints subnet prefix')
 param privateEndpointSubnetPrefix string = '10.0.2.0/24'
 
+@description('SKU tier driving resource sizing. "dev" = cost-optimized, "prod" = production-grade.')
+@allowed([
+  'dev'
+  'prod'
+])
+param skuTier string = environmentName == 'prod' ? 'prod' : 'dev'
+
 var prefix = 'cpm-${environmentName}'
 var tags = {
   project: 'ChromePolicyManager'
   environment: environmentName
+  skuTier: skuTier
 }
+
+// ============================================================
+// SKU configuration - two tiers (dev / prod)
+// dev  : minimal cost for development & testing
+// prod : production-grade for scale (100k+ devices), SLA-backed
+// ============================================================
+var skuConfig = {
+  dev: {
+    appServicePlan: {
+      name: 'B1'
+      tier: 'Basic'
+      capacity: 1
+    }
+    sqlDatabase: {
+      name: 'Basic'
+      tier: 'Basic'
+    }
+    serviceBus: {
+      name: 'Standard'
+      tier: 'Standard'
+    }
+    apim: {
+      name: 'Developer'
+      capacity: 1
+    }
+    appConfig: {
+      name: 'Free'
+    }
+    logRetentionDays: 30
+  }
+  prod: {
+    appServicePlan: {
+      name: 'P1v3'
+      tier: 'PremiumV3'
+      capacity: 2
+    }
+    sqlDatabase: {
+      name: 'S2'
+      tier: 'Standard'
+    }
+    serviceBus: {
+      name: 'Standard'
+      tier: 'Standard'
+    }
+    apim: {
+      name: 'Standard'
+      capacity: 1
+    }
+    appConfig: {
+      name: 'Standard'
+    }
+    logRetentionDays: 90
+  }
+}
+var sku = skuConfig[skuTier]
 
 // ============================================================
 // Networking - VNet, Subnets, Private DNS Zones
@@ -121,7 +184,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10
   tags: tags
   properties: {
     sku: { name: 'PerGB2018' }
-    retentionInDays: 30
+    retentionInDays: sku.logRetentionDays
   }
 }
 
@@ -137,6 +200,18 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 // ============================================================
+// User-Assigned Managed Identity (shared by API app + SQL admin)
+// Using a UAMI makes the principalId known up-front, which breaks the
+// circular dependency between the App Service and the SQL Server AAD admin.
+// ============================================================
+
+resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: '${prefix}-api-id'
+  location: location
+  tags: tags
+}
+
+// ============================================================
 // App Service Plan + Apps (with VNet integration)
 // ============================================================
 
@@ -145,8 +220,9 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   location: location
   tags: tags
   sku: {
-    name: 'B1'
-    tier: 'Basic'
+    name: sku.appServicePlan.name
+    tier: sku.appServicePlan.tier
+    capacity: sku.appServicePlan.capacity
   }
   properties: {
     reserved: false // Windows
@@ -158,7 +234,10 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
   location: location
   tags: tags
   identity: {
-    type: 'SystemAssigned'
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
   }
   properties: {
     serverFarmId: appServicePlan.id
@@ -172,6 +251,8 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureAd__ClientId', value: clientId }
         { name: 'AzureAd__ClientSecret', value: clientSecret }
         { name: 'AzureAd__AllowWebApiToBeAuthorizedByACL', value: 'true' }
+        // DefaultAzureCredential picks this UAMI for Graph / SQL / Service Bus tokens
+        { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'ASPNETCORE_ENVIRONMENT', value: environmentName == 'prod' ? 'Production' : 'Development' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
         { name: 'ServiceBus__FullyQualifiedNamespace', value: deployServiceBus ? '${serviceBusNamespace.name}.servicebus.windows.net' : '' }
@@ -226,7 +307,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
       azureADOnlyAuthentication: true
       principalType: 'Application'
       login: 'ChromePolicyManager API'
-      sid: apiAppService.identity.principalId
+      sid: uami.properties.principalId
       tenantId: tenantId
     }
   }
@@ -238,8 +319,8 @@ resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
   location: location
   tags: tags
   sku: {
-    name: 'Basic'
-    tier: 'Basic'
+    name: sku.sqlDatabase.name
+    tier: sku.sqlDatabase.tier
   }
 }
 
@@ -292,8 +373,8 @@ resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview
   location: location
   tags: tags
   sku: {
-    name: 'Standard'
-    tier: 'Standard'
+    name: sku.serviceBus.name
+    tier: sku.serviceBus.tier
   }
   properties: {
     disableLocalAuth: true // No SAS — Managed Identity only
@@ -348,10 +429,10 @@ resource serviceBusPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/priva
 
 // RBAC: API Managed Identity → Service Bus Data Owner
 resource serviceBusRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployServiceBus) {
-  name: guid(serviceBusNamespace.id, apiAppService.identity.principalId, '090c5cfd-751d-490a-894a-3ce6f1109419')
+  name: guid(serviceBusNamespace.id, uami.id, '090c5cfd-751d-490a-894a-3ce6f1109419')
   scope: serviceBusNamespace
   properties: {
-    principalId: apiAppService.identity.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '090c5cfd-751d-490a-894a-3ce6f1109419') // Azure Service Bus Data Owner
     principalType: 'ServicePrincipal'
   }
@@ -366,7 +447,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' =
   location: location
   tags: tags
   sku: {
-    name: 'Free'
+    name: sku.appConfig.name
   }
 }
 
@@ -397,8 +478,8 @@ resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   location: location
   tags: tags
   sku: {
-    name: 'Developer'
-    capacity: 1
+    name: sku.apim.name
+    capacity: sku.apim.capacity
   }
   identity: {
     type: 'SystemAssigned'
@@ -468,3 +549,9 @@ output keyVaultUri string = keyVault.properties.vaultUri
 output serviceBusNamespace string = deployServiceBus ? serviceBusNamespace.name : ''
 output appInsightsConnectionString string = applicationInsights.properties.ConnectionString
 output vnetId string = vnet.id
+output skuTier string = skuTier
+output apiIdentityClientId string = uami.properties.clientId
+output apiIdentityPrincipalId string = uami.properties.principalId
+output apiAppName string = apiAppService.name
+output adminAppName string = adminAppService.name
+output resourceGroupName string = resourceGroup().name
