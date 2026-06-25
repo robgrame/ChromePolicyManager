@@ -18,7 +18,20 @@
     <div class="card mb-4">
         <div class="card-body">
             <div class="row text-center text-md-start g-3">
-                <div class="col-6 col-md-3"><div class="small text-secondary">Template Version</div><div class="h6 mb-0">@_stats.TemplateVersion</div></div>
+                <div class="col-6 col-md-3">
+                    <div class="small text-secondary">Template Version</div>
+                    <div class="h6 mb-0">
+                        @_stats.TemplateVersion
+                        @if (_latest is not null && _latest.UpdateAvailable)
+                        {
+                            <span class="badge text-bg-warning ms-1" title="A newer Chrome policy template is available">update available</span>
+                        }
+                        else if (_latest is not null && !string.IsNullOrEmpty(_latest.Latest) && !_latest.UpdateAvailable)
+                        {
+                            <span class="badge text-bg-success ms-1" title="Catalog is up to date"><i class="bi bi-check-lg"></i></span>
+                        }
+                    </div>
+                </div>
                 <div class="col-6 col-md-2"><div class="small text-secondary">Total Policies</div><div class="h6 mb-0">@_stats.TotalEntries</div></div>
                 <div class="col-6 col-md-2"><div class="small text-secondary">Mandatory</div><div class="h6 mb-0">@_stats.MandatoryPolicies</div></div>
                 <div class="col-6 col-md-2"><div class="small text-secondary">Recommended</div><div class="h6 mb-0">@_stats.RecommendedPolicies</div></div>
@@ -26,6 +39,30 @@
             </div>
         </div>
     </div>
+
+    @if (_latest is not null && _latest.UpdateAvailable)
+    {
+        <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+                <i class="bi bi-arrow-up-circle me-1"></i>
+                A newer Chrome policy template is available from Google:
+                <strong>@_latest.Latest</strong>
+                (imported: <strong>@(_latest.Imported ?? "none")</strong>).
+            </div>
+            <button class="btn btn-sm btn-warning" @onclick="ImportLatestFromGoogleAsync" disabled="@_importing">
+                @if (_importing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                    <span>Updating…</span>
+                }
+                else
+                {
+                    <i class="bi bi-download me-1"></i>
+                    <span>Import version @_latest.Latest</span>
+                }
+            </button>
+        </div>
+    }
 }
 else if (_stats is null && !_loading)
 {
@@ -243,6 +280,8 @@ else if (_stats is null && !_loading)
     private List<string> _categories = [];
     private List<PolicySetDto> _policySets = [];
     private CatalogStatsDto? _stats;
+    private LatestVersionDto? _latest;
+    private bool _checkingLatest;
     private bool _loading = true;
     private string _searchText = "";
     private string? _selectedCategory;
@@ -282,9 +321,33 @@ else if (_stats is null && !_loading)
         }
         catch (Exception ex) { Toast.Error($"Failed to load catalog: {ex.Message}"); }
         finally { _loading = false; }
+
+        await CheckLatestVersionAsync();
+    }
+
+    private async Task CheckLatestVersionAsync()
+    {
+        _checkingLatest = true;
+        try { _latest = await Api.GetLatestAvailableVersionAsync(); }
+        catch { /* best-effort: network/API hiccup shouldn't break the page */ }
+        finally { _checkingLatest = false; StateHasChanged(); }
     }
 
     private void OnFileSelected(InputFileChangeEventArgs e) => _selectedFile = e.File;
+
+    private async Task ImportLatestFromGoogleAsync()
+    {
+        _importing = true; _importResult = null; _importError = null;
+        try
+        {
+            // Empty version => API auto-detects the real version from the zip's VERSION file.
+            _importResult = await Api.ImportCatalogFromUrlAsync("", diffMode: false);
+            await ReloadAfterImport();
+            Toast.Success($"Updated catalog to version {_importResult.TemplateVersion} ({_importResult.TotalParsed} policies)!");
+        }
+        catch (Exception ex) { _importError = ex.Message; Toast.Error($"Update failed: {ex.Message}"); }
+        finally { _importing = false; }
+    }
 
     private async Task ImportFromUrlAsync()
     {
@@ -320,6 +383,7 @@ else if (_stats is null && !_loading)
         _categories = await Api.GetCatalogCategoriesAsync();
         _entries = await Api.GetCatalogAsync();
         ApplyFilters();
+        await CheckLatestVersionAsync();
     }
 
     private void OnSearchChanged(ChangeEventArgs e) { _searchText = e.Value?.ToString() ?? ""; ApplyFilters(); }

@@ -166,6 +166,11 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<CatalogStatsDto>("/api/catalog/stats", JsonOptions) ?? new();
     }
 
+    public async Task<LatestVersionDto> GetLatestAvailableVersionAsync()
+    {
+        return await _http.GetFromJsonAsync<LatestVersionDto>("/api/catalog/latest-available", JsonOptions) ?? new();
+    }
+
     public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version, bool diffMode = false)
     {
         using var content = new MultipartFormDataContent();
@@ -317,6 +322,14 @@ public class CatalogStatsDto
     public int Categories { get; set; }
     public string TemplateVersion { get; set; } = "";
     public DateTime? LastImport { get; set; }
+}
+
+public class LatestVersionDto
+{
+    public string? Imported { get; set; }
+    public string? Latest { get; set; }
+    public bool UpdateAvailable { get; set; }
+    public string? Error { get; set; }
 }
 
 public class CatalogImportResultDto
