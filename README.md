@@ -126,12 +126,14 @@ This creates: Resource Group, VNet (App Service VNet integration), SQL Server (P
 |----------|-------|--------|
 | App Service Plan | B1 (Basic) | P1v3 ×2 (PremiumV3) |
 | SQL Database | Basic (5 DTU) | S2 (Standard, 50 DTU) |
-| API Management | Developer | Standard |
+| API Management | off (direct API) | Standard |
 | App Configuration | Free | Standard |
 | Service Bus | off by default | Standard (Private Endpoint) |
 | Log Analytics retention | 30 days | 90 days |
 
 The tier is selected by the `skuTier` Bicep parameter (defaults from `environmentName`) and the matching parameter files: `main.dev.bicepparam` / `main.prod.bicepparam`.
+
+> **APIM in dev:** APIM is the most expensive fixed-cost resource (~€45/month). It is **off by default in dev** (`deployApim=false`). Devices then call the backend directly — set `CPM_USE_DIRECT_API=true` on the device and leave `ApimGateway:ClientId` unset so the backend middleware allows direct access. This skips mTLS, rate limiting and edge JWT validation, so device endpoints are unauthenticated in dev — acceptable for development, **not** for prod.
 
 > **Note:** `Deploy-Infrastructure.ps1` (imperative az-CLI variant) remains available for step-by-step provisioning without Bicep.
 

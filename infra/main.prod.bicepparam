@@ -11,6 +11,9 @@ param location = 'westeurope'
 // Service Bus enabled in prod for async device report processing (MI-only, no SAS)
 param deployServiceBus = true
 
+// APIM required in prod: mTLS device auth, rate limiting, edge JWT validation
+param deployApim = true
+
 // Replace with your tenant/app values (or pass via --parameters on the CLI)
 param tenantId = 'YOUR_TENANT_ID'
 param clientId = 'YOUR_CLIENT_ID'

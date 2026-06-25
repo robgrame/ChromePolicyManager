@@ -470,10 +470,18 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 }
 
 // ============================================================
-// API Management - Developer SKU with mTLS
+// API Management - mTLS gateway for device traffic
+// APIM (Developer SKU) is the single most expensive fixed-cost resource.
+// It is optional in dev: when not deployed, devices call the backend directly
+// (set CPM_USE_DIRECT_API=true on the device, and leave ApimGateway:ClientId unset
+//  so the backend middleware allows direct access).
+// In prod it is required (mTLS, rate limiting, edge JWT validation).
 // ============================================================
 
-resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
+@description('Deploy API Management gateway. Defaults to true only for the prod SKU tier (Developer SKU ~€45/month).')
+param deployApim bool = skuTier == 'prod'
+
+resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = if (deployApim) {
   name: '${prefix}-apim2'
   location: location
   tags: tags
@@ -499,7 +507,7 @@ resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = {
   }
 }
 
-resource apimLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-preview' = {
+resource apimLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-preview' = if (deployApim) {
   parent: apim
   name: 'appinsights'
   properties: {
@@ -511,7 +519,7 @@ resource apimLogger 'Microsoft.ApiManagement/service/loggers@2023-09-01-preview'
   }
 }
 
-resource apimDiagnostics 'Microsoft.ApiManagement/service/diagnostics@2023-09-01-preview' = {
+resource apimDiagnostics 'Microsoft.ApiManagement/service/diagnostics@2023-09-01-preview' = if (deployApim) {
   parent: apim
   name: 'applicationinsights'
   properties: {
@@ -525,7 +533,7 @@ resource apimDiagnostics 'Microsoft.ApiManagement/service/diagnostics@2023-09-01
 }
 
 // APIM - Device API (Client-facing, mTLS)
-resource apimDeviceApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = {
+resource apimDeviceApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = if (deployApim) {
   parent: apim
   name: 'device-api'
   properties: {
@@ -543,7 +551,7 @@ resource apimDeviceApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview'
 
 output apiUrl string = 'https://${apiAppService.properties.defaultHostName}'
 output adminUrl string = 'https://${adminAppService.properties.defaultHostName}'
-output apimGatewayUrl string = apim.properties.gatewayUrl
+output apimGatewayUrl string = deployApim ? apim.properties.gatewayUrl : ''
 output appConfigEndpoint string = appConfig.properties.endpoint
 output keyVaultUri string = keyVault.properties.vaultUri
 output serviceBusNamespace string = deployServiceBus ? serviceBusNamespace.name : ''
