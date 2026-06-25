@@ -1,69 +1,68 @@
-@using ChromePolicyManager.Admin.Services
 @using System.Text.Json
 
-<MudDialog>
-    <TitleContent>
-        <MudText Typo="Typo.h6">@Entry.Name</MudText>
-    </TitleContent>
-    <DialogContent>
-        <MudGrid>
-            <MudItem xs="12">
-                <MudText Typo="Typo.subtitle1" Color="Color.Primary">@Entry.DisplayName</MudText>
-            </MudItem>
-            <MudItem xs="12">
-                <MudText Typo="Typo.body2">@Entry.Description</MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Category</MudText>
-                <MudText>@Entry.Category</MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Data Type</MudText>
-                <MudText>@Entry.DataType</MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Registry Key</MudText>
-                <MudText Typo="Typo.body2"><code>@Entry.RegistryKey</code></MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Value Name</MudText>
-                <MudText Typo="Typo.body2"><code>@Entry.RegistryValueName</code></MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Supported On</MudText>
-                <MudText>@Entry.SupportedOn</MudText>
-            </MudItem>
-            <MudItem xs="6">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Class</MudText>
-                <MudText>@Entry.PolicyClass</MudText>
-            </MudItem>
+<Modal Visible="Visible" VisibleChanged="VisibleChanged" Title="@Entry?.Name" Icon="bi-info-circle" Size="lg" OnClose="Close">
+    <ChildContent>
+    @if (Entry is not null)
+    {
+        <h6 class="text-brand">@Entry.DisplayName</h6>
+        <p class="text-body-secondary">@Entry.Description</p>
+        <div class="row g-3">
+            <div class="col-6">
+                <div class="small text-secondary">Category</div>
+                <div>@Entry.Category</div>
+            </div>
+            <div class="col-6">
+                <div class="small text-secondary">Data Type</div>
+                <div>@Entry.DataType</div>
+            </div>
+            <div class="col-6">
+                <div class="small text-secondary">Registry Key</div>
+                <div class="mono small">@Entry.RegistryKey</div>
+            </div>
+            <div class="col-6">
+                <div class="small text-secondary">Value Name</div>
+                <div class="mono small">@Entry.RegistryValueName</div>
+            </div>
+            <div class="col-6">
+                <div class="small text-secondary">Supported On</div>
+                <div>@Entry.SupportedOn</div>
+            </div>
+            <div class="col-6">
+                <div class="small text-secondary">Class</div>
+                <div>@Entry.PolicyClass</div>
+            </div>
             @if (!string.IsNullOrEmpty(Entry.EnumOptions))
             {
-                <MudItem xs="12">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Enum Options</MudText>
-                    <MudSimpleTable Dense="true" Striped="true" Class="mt-1">
+                <div class="col-12">
+                    <div class="small text-secondary mb-1">Enum Options</div>
+                    <table class="table table-sm table-striped">
                         <thead><tr><th>Value</th><th>Display Name</th></tr></thead>
                         <tbody>
                             @foreach (var opt in ParseEnumOptions(Entry.EnumOptions))
                             {
-                                <tr><td>@opt.Value</td><td>@opt.Display</td></tr>
+                                <tr><td class="mono">@opt.Value</td><td>@opt.Display</td></tr>
                             }
                         </tbody>
-                    </MudSimpleTable>
-                </MudItem>
+                    </table>
+                </div>
             }
-        </MudGrid>
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="Cancel">Close</MudButton>
-    </DialogActions>
-</MudDialog>
+        </div>
+    }
+    </ChildContent>
+    <Footer>
+        <button type="button" class="btn btn-outline-secondary" @onclick="Close">Close</button>
+    </Footer>
+</Modal>
 
 @code {
-    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-    [Parameter] public PolicyCatalogEntryDto Entry { get; set; } = default!;
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public PolicyCatalogEntryDto? Entry { get; set; }
 
-    private void Cancel() => MudDialog.Close();
+    private async Task Close()
+    {
+        if (VisibleChanged.HasDelegate) await VisibleChanged.InvokeAsync(false);
+    }
 
     private List<(string Value, string Display)> ParseEnumOptions(string json)
     {

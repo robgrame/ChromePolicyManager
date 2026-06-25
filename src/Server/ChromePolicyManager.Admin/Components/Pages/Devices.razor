@@ -1,185 +1,173 @@
 @page "/devices"
 @inject PolicyApiClient Api
-@inject ISnackbar Snackbar
+@inject ToastService Toast
 
 <PageTitle>Device Monitoring - Chrome Policy Manager</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">Device Monitoring</MudText>
+<div class="page-header">
+    <i class="bi bi-pc-display fs-3"></i>
+    <h1 class="h3 mb-0">Device Monitoring</h1>
+</div>
 
-<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
-    <MudTabPanel Text="All Devices" Icon="@Icons.Material.Filled.Devices">
-        @if (_loadingDashboard)
-        {
-            <MudProgressLinear Indeterminate="true" />
-        }
-        else if (_dashboard?.RecentReports.Any() == true)
-        {
-            <MudTable Items="@_dashboard.RecentReports" Hover="true" Striped="true" Dense="true"
-                      Filter="new Func<DeviceStateDto, bool>(FilterFunc)">
-                <ToolBarContent>
-                    <MudTextField @bind-Value="_searchString" Placeholder="Search devices..." Adornment="Adornment.Start"
-                                  AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="mt-0" />
-                </ToolBarContent>
-                <HeaderContent>
-                    <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.DeviceName)">Device</MudTableSortLabel></MudTh>
-                    <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.Status)">Status</MudTableSortLabel></MudTh>
-                    <MudTh>Policy Hash</MudTh>
-                    <MudTh>Chrome</MudTh>
-                    <MudTh>OS</MudTh>
-                    <MudTh>Model</MudTh>
-                    <MudTh>Script</MudTh>
-                    <MudTh>Keys Applied</MudTh>
-                    <MudTh><MudTableSortLabel SortBy="new Func<DeviceStateDto, object>(x => x.LastContact)">Last Contact</MudTableSortLabel></MudTh>
-                    <MudTh>Errors</MudTh>
-                    <MudTh>Actions</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                            <MudIcon Icon="@Icons.Material.Filled.Computer" Size="Size.Small" Color="@GetDeviceIconColor(context)" />
-                            <MudText Typo="Typo.body2"><strong>@context.DeviceName</strong></MudText>
-                        </MudStack>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">@Truncate(context.DeviceId, 8)…</MudText>
-                    </MudTd>
-                    <MudTd>
-                        <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
-                            @context.Status
-                        </MudChip>
-                    </MudTd>
-                    <MudTd>
-                        <MudTooltip Text="@(context.AppliedPolicyHash ?? "None")">
-                            <MudText Typo="Typo.caption" Style="font-family: monospace;">
-                                @(Truncate(context.AppliedPolicyHash, 12))
-                            </MudText>
-                        </MudTooltip>
-                    </MudTd>
-                    <MudTd>@(context.ChromeVersion ?? "—")</MudTd>
-                    <MudTd>
-                        <MudText Typo="Typo.body2">@(context.OsVersion ?? "—")</MudText>
-                        @if (!string.IsNullOrEmpty(context.OsBuild))
-                        {
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Build @context.OsBuild</MudText>
-                        }
-                    </MudTd>
-                    <MudTd>
-                        @if (!string.IsNullOrEmpty(context.Manufacturer) || !string.IsNullOrEmpty(context.Model))
-                        {
-                            <MudText Typo="Typo.body2">@(context.Manufacturer ?? "") @(context.Model ?? "")</MudText>
-                        }
-                        else
-                        {
-                            <MudText>—</MudText>
-                        }
-                    </MudTd>
-                    <MudTd>
-                        <MudText Typo="Typo.caption" Style="font-family: monospace;">@(context.ScriptVersion ?? "—")</MudText>
-                    </MudTd>
-                    <MudTd>
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">
-                            +@context.PolicyKeysWritten
-                        </MudChip>
-                    </MudTd>
-                    <MudTd>
-                        <MudTooltip Text="@context.LastContact.ToLocalTime().ToString("F")">
-                            @GetRelativeTime(context.LastContact)
-                        </MudTooltip>
-                    </MudTd>
-                    <MudTd>
-                        @if (!string.IsNullOrEmpty(context.Errors))
-                        {
-                            <MudTooltip Text="@context.Errors">
-                                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Size="Size.Small" />
-                            </MudTooltip>
-                        }
-                    </MudTd>
-                    <MudTd>
-                        <MudTooltip Text="Trigger on-demand remediation script">
-                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Primary"
-                                           OnClick="@(() => TriggerDeviceRemediation(context))" />
-                        </MudTooltip>
-                    </MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
-        else
-        {
-            <MudAlert Severity="Severity.Info">
-                No device reports yet. Devices will check in after the Proactive Remediation runs (scheduled hourly).
-            </MudAlert>
-        }
-    </MudTabPanel>
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button class="nav-link @(_tab == 0 ? "active" : "")" @onclick="() => _tab = 0">
+            <i class="bi bi-pc-display me-1"></i> All Devices
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(_tab == 1 ? "active" : "")" @onclick="() => _tab = 1">
+            <i class="bi bi-wifi-off me-1"></i> Offline
+            @if (_offlineCount > 0) { <span class="badge text-bg-warning ms-1">@_offlineCount</span> }
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(_tab == 2 ? "active" : "")" @onclick="() => _tab = 2">
+            <i class="bi bi-exclamation-triangle me-1"></i> Errors
+            @if (_errorCount > 0) { <span class="badge text-bg-danger ms-1">@_errorCount</span> }
+        </button>
+    </li>
+</ul>
 
-    <MudTabPanel Text="Offline Devices" Icon="@Icons.Material.Filled.WifiOff" BadgeData="@_offlineCount" BadgeColor="Color.Warning">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-            <MudText Typo="Typo.body1">Devices that haven't checked in within:</MudText>
-            <MudSelect T="int" Value="_offlineHours" ValueChanged="@((int h) => LoadOfflineDevices(h))" 
-                       Variant="Variant.Outlined" Dense="true" Style="width:120px">
-                <MudSelectItem Value="4">4 hours</MudSelectItem>
-                <MudSelectItem Value="12">12 hours</MudSelectItem>
-                <MudSelectItem Value="24">24 hours</MudSelectItem>
-                <MudSelectItem Value="72">3 days</MudSelectItem>
-                <MudSelectItem Value="168">7 days</MudSelectItem>
-            </MudSelect>
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => LoadOfflineDevices(_offlineHours))">
-                Refresh
-            </MudButton>
-        </MudStack>
-
-        @if (_offlineDevices.Any())
-        {
-            <MudTable Items="@_offlineDevices" Hover="true" Dense="true">
-                <HeaderContent>
-                    <MudTh>Device</MudTh>
-                    <MudTh>Last Contact</MudTh>
-                    <MudTh>Last Status</MudTh>
-                    <MudTh>Last Policy Hash</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd><strong>@context.DeviceName</strong></MudTd>
-                    <MudTd>
-                        <MudText Color="Color.Warning">@GetRelativeTime(context.LastContact)</MudText>
-                    </MudTd>
-                    <MudTd>@context.Status</MudTd>
-                    <MudTd><MudText Typo="Typo.caption" Style="font-family:monospace;">@(Truncate(context.AppliedPolicyHash, 12))</MudText></MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
-        else
-        {
-            <MudAlert Severity="Severity.Success">All devices have checked in recently.</MudAlert>
-        }
-    </MudTabPanel>
-
-    <MudTabPanel Text="Errors" Icon="@Icons.Material.Filled.ErrorOutline" BadgeData="@_errorCount" BadgeColor="Color.Error">
-        @if (_errorDevices.Any())
-        {
-            <MudTable Items="@_errorDevices" Hover="true" Dense="true">
-                <HeaderContent>
-                    <MudTh>Device</MudTh>
-                    <MudTh>Status</MudTh>
-                    <MudTh>Error Details</MudTh>
-                    <MudTh>Last Contact</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd><strong>@context.DeviceName</strong></MudTd>
-                    <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Error">@context.Status</MudChip></MudTd>
-                    <MudTd>
-                        <MudText Typo="Typo.body2" Style="max-width:400px; overflow:hidden; text-overflow:ellipsis;">
-                            @context.Errors
-                        </MudText>
-                    </MudTd>
-                    <MudTd>@GetRelativeTime(context.LastContact)</MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
-        else
-        {
-            <MudAlert Severity="Severity.Success">No devices reporting errors.</MudAlert>
-        }
-    </MudTabPanel>
-</MudTabs>
+@if (_tab == 0)
+{
+    @if (_loadingDashboard)
+    {
+        <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_dashboard?.RecentReports.Any() == true)
+    {
+        <div class="input-group mb-3" style="max-width:360px;">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input class="form-control" placeholder="Search devices..." @bind="_searchString" @bind:event="oninput" />
+        </div>
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Device</th><th>Status</th><th>Policy Hash</th><th>Chrome</th>
+                            <th>OS</th><th>Model</th><th>Script</th><th>Keys</th><th>Last Contact</th><th>Err</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in Filtered(_dashboard.RecentReports))
+                        {
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center gap-1">
+                                        <i class="bi bi-display text-@DeviceIcon(d)"></i>
+                                        <strong>@d.DeviceName</strong>
+                                    </div>
+                                    <div class="small text-secondary mono">@Truncate(d.DeviceId, 8)…</div>
+                                </td>
+                                <td><span class="badge text-bg-@StatusBadge(d.Status)">@d.Status</span></td>
+                                <td class="mono small" title="@(d.AppliedPolicyHash ?? "None")">@Truncate(d.AppliedPolicyHash, 12)</td>
+                                <td>@(d.ChromeVersion ?? "—")</td>
+                                <td>
+                                    @(d.OsVersion ?? "—")
+                                    @if (!string.IsNullOrEmpty(d.OsBuild)) { <div class="small text-secondary">Build @d.OsBuild</div> }
+                                </td>
+                                <td>@(string.IsNullOrEmpty(d.Manufacturer) && string.IsNullOrEmpty(d.Model) ? "—" : $"{d.Manufacturer} {d.Model}")</td>
+                                <td class="mono small">@(d.ScriptVersion ?? "—")</td>
+                                <td><span class="badge text-bg-success-subtle text-success">+@d.PolicyKeysWritten</span></td>
+                                <td title="@d.LastContact.ToLocalTime().ToString("F")">@RelTime(d.LastContact)</td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(d.Errors))
+                                    {
+                                        <i class="bi bi-exclamation-triangle-fill text-danger" title="@d.Errors"></i>
+                                    }
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" title="Trigger on-demand remediation"
+                                            @onclick="() => TriggerDeviceRemediation(d)">
+                                        <i class="bi bi-play-fill"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">
+            No device reports yet. Devices will check in after the Proactive Remediation runs (scheduled hourly).
+        </div>
+    }
+}
+else if (_tab == 1)
+{
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+        <span>Devices that haven't checked in within:</span>
+        <select class="form-select w-auto" @bind="_offlineHours" @bind:after="() => LoadOfflineDevices(_offlineHours)">
+            <option value="4">4 hours</option>
+            <option value="12">12 hours</option>
+            <option value="24">24 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+        </select>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="() => LoadOfflineDevices(_offlineHours)">Refresh</button>
+    </div>
+    @if (_offlineDevices.Any())
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th>Device</th><th>Last Contact</th><th>Last Status</th><th>Last Policy Hash</th></tr></thead>
+                    <tbody>
+                        @foreach (var d in _offlineDevices)
+                        {
+                            <tr>
+                                <td><strong>@d.DeviceName</strong></td>
+                                <td class="text-warning">@RelTime(d.LastContact)</td>
+                                <td>@d.Status</td>
+                                <td class="mono small">@Truncate(d.AppliedPolicyHash, 12)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-success">All devices have checked in recently.</div>
+    }
+}
+else
+{
+    @if (_errorDevices.Any())
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th>Device</th><th>Status</th><th>Error Details</th><th>Last Contact</th></tr></thead>
+                    <tbody>
+                        @foreach (var d in _errorDevices)
+                        {
+                            <tr>
+                                <td><strong>@d.DeviceName</strong></td>
+                                <td><span class="badge text-bg-danger">@d.Status</span></td>
+                                <td class="small text-truncate" style="max-width:400px;">@d.Errors</td>
+                                <td>@RelTime(d.LastContact)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-success">No devices reporting errors.</div>
+    }
+}
 
 @code {
+    private int _tab = 0;
     private MonitoringDashboardDto? _dashboard;
     private List<DeviceStateDto> _offlineDevices = [];
     private List<DeviceStateDto> _errorDevices = [];
@@ -197,11 +185,8 @@
     private async Task LoadDashboard()
     {
         _loadingDashboard = true;
-        try
-        {
-            _dashboard = await Api.GetDashboardAsync();
-        }
-        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        try { _dashboard = await Api.GetDashboardAsync(); }
+        catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
         finally { _loadingDashboard = false; }
     }
 
@@ -226,26 +211,28 @@
         catch { _errorDevices = []; }
     }
 
-    private bool FilterFunc(DeviceStateDto device) =>
-        string.IsNullOrWhiteSpace(_searchString) ||
-        device.DeviceName.Contains(_searchString, StringComparison.OrdinalIgnoreCase) ||
-        device.DeviceId.Contains(_searchString, StringComparison.OrdinalIgnoreCase);
+    private IEnumerable<DeviceStateDto> Filtered(IEnumerable<DeviceStateDto> items) =>
+        string.IsNullOrWhiteSpace(_searchString)
+            ? items
+            : items.Where(d =>
+                d.DeviceName.Contains(_searchString, StringComparison.OrdinalIgnoreCase) ||
+                d.DeviceId.Contains(_searchString, StringComparison.OrdinalIgnoreCase));
 
-    private Color GetStatusColor(string status) => status switch
+    private static string StatusBadge(string status) => status switch
     {
-        "Compliant" => Color.Success,
-        "PartiallyApplied" => Color.Warning,
-        "Error" => Color.Error,
-        _ => Color.Default
+        "Compliant" => "success",
+        "PartiallyApplied" => "warning",
+        "Error" => "danger",
+        _ => "secondary"
     };
 
-    private Color GetDeviceIconColor(DeviceStateDto device)
+    private static string DeviceIcon(DeviceStateDto d)
     {
-        if ((DateTime.UtcNow - device.LastContact).TotalHours > 24) return Color.Warning;
-        return device.Status == "Compliant" ? Color.Success : Color.Error;
+        if ((DateTime.UtcNow - d.LastContact).TotalHours > 24) return "warning";
+        return d.Status == "Compliant" ? "success" : "danger";
     }
 
-    private string GetRelativeTime(DateTime utcTime)
+    private static string RelTime(DateTime utcTime)
     {
         var diff = DateTime.UtcNow - utcTime;
         if (diff.TotalMinutes < 5) return "Just now";
@@ -265,12 +252,12 @@
         try
         {
             var result = await Api.TriggerDeviceRemediationAsync(device.DeviceId);
-            Snackbar.Add($"{device.DeviceName}: {result.Message}", 
-                result.CommandsFailed > 0 ? Severity.Warning : Severity.Success);
+            if (result.CommandsFailed > 0) Toast.Warning($"{device.DeviceName}: {result.Message}");
+            else Toast.Success($"{device.DeviceName}: {result.Message}");
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error triggering remediation for {device.DeviceName}: {ex.Message}", Severity.Error);
+            Toast.Error($"Error triggering remediation for {device.DeviceName}: {ex.Message}");
         }
     }
 }

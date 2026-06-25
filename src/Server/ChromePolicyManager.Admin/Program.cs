@@ -1,7 +1,6 @@
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ChromePolicyManager.Admin.Components;
 using ChromePolicyManager.Admin.Services;
-using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,7 +11,9 @@ builder.Services.AddOpenTelemetry().UseAzureMonitor();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddMudServices();
+// UI notification + confirmation services (Bootstrap-based, replaces MudBlazor)
+builder.Services.AddScoped<ToastService>();
+builder.Services.AddScoped<ConfirmService>();
 
 // Increase SignalR message size for large file uploads (ADMX zip ~113MB)
 builder.Services.AddSignalR(options =>

@@ -2,242 +2,239 @@
 @using ChromePolicyManager.Admin.Services
 @using ChromePolicyManager.Admin.Components.Pages.Dialogs
 @inject PolicyApiClient Api
-@inject IDialogService DialogService
+@inject ToastService Toast
 
 <PageTitle>Policy Catalog - Chrome Policy Manager</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">
-    <MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Class="mr-2" />
-    Chrome Policy Catalog
-</MudText>
+<div class="page-header">
+    <i class="bi bi-collection fs-3"></i>
+    <h1 class="h3 mb-0">Chrome Policy Catalog</h1>
+</div>
 
 @* Stats banner *@
 @if (_stats is not null)
 {
-    <MudPaper Class="pa-4 mb-4" Elevation="1">
-        <MudGrid>
-            <MudItem xs="12" sm="3">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Template Version</MudText>
-                <MudText Typo="Typo.h6">@_stats.TemplateVersion</MudText>
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Total Policies</MudText>
-                <MudText Typo="Typo.h6">@_stats.TotalEntries</MudText>
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Mandatory</MudText>
-                <MudText Typo="Typo.h6">@_stats.MandatoryPolicies</MudText>
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Recommended</MudText>
-                <MudText Typo="Typo.h6">@_stats.RecommendedPolicies</MudText>
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Last Import</MudText>
-                <MudText Typo="Typo.h6">@(_stats.LastImport?.ToString("yyyy-MM-dd HH:mm") ?? "Never")</MudText>
-            </MudItem>
-        </MudGrid>
-    </MudPaper>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row text-center text-md-start g-3">
+                <div class="col-6 col-md-3"><div class="small text-secondary">Template Version</div><div class="h6 mb-0">@_stats.TemplateVersion</div></div>
+                <div class="col-6 col-md-2"><div class="small text-secondary">Total Policies</div><div class="h6 mb-0">@_stats.TotalEntries</div></div>
+                <div class="col-6 col-md-2"><div class="small text-secondary">Mandatory</div><div class="h6 mb-0">@_stats.MandatoryPolicies</div></div>
+                <div class="col-6 col-md-2"><div class="small text-secondary">Recommended</div><div class="h6 mb-0">@_stats.RecommendedPolicies</div></div>
+                <div class="col-6 col-md-3"><div class="small text-secondary">Last Import</div><div class="h6 mb-0">@(_stats.LastImport?.ToString("yyyy-MM-dd HH:mm") ?? "Never")</div></div>
+            </div>
+        </div>
+    </div>
 }
 else if (_stats is null && !_loading)
 {
-    <MudAlert Severity="Severity.Info" Class="mb-4">
+    <div class="alert alert-info">
         No policies imported yet. Upload the Chrome ADMX template zip to populate the catalog.
-    </MudAlert>
+    </div>
 }
 
 @* Import section *@
-<MudExpansionPanels Class="mb-4">
-    <MudExpansionPanel Text="Import ADMX Templates" Icon="@Icons.Material.Filled.Upload">
-        <MudText Typo="Typo.body2" Class="mb-3">
-            Import Chrome policy definitions from ADMX templates. Choose one method:
-        </MudText>
-        
-        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4">
-            @* Tab 1: Download from Google (recommended — avoids large file upload through SignalR) *@
-            <MudTabPanel Text="Download from Google" Icon="@Icons.Material.Filled.CloudDownload">
-                <MudText Typo="Typo.body2" Class="mb-3 mt-3">
-                    The server downloads the latest Chrome ADMX templates directly from Google Enterprise.
-                    This is the recommended method (avoids 113MB upload through the browser).
-                </MudText>
-                <MudGrid>
-                    <MudItem xs="12" sm="4">
-                        <MudTextField @bind-Value="_importVersion" Label="Version Label" Placeholder="e.g. 136.0.7103.48" Variant="Variant.Outlined" />
-                    </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudSelect @bind-Value="_importMode" Label="Import Mode" Variant="Variant.Outlined">
-                            <MudSelectItem Value="@("full")">Full (replace all)</MudSelectItem>
-                            <MudSelectItem Value="@("diff")">Differential (delta only)</MudSelectItem>
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="12" sm="3" Class="d-flex align-end">
-                        <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_importing)"
-                                   OnClick="ImportFromUrlAsync" StartIcon="@Icons.Material.Filled.Download">
-                            @if (_importing)
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                <text>Downloading...</text>
-                            }
-                            else
-                            {
-                                <text>Import from Google</text>
-                            }
-                        </MudButton>
-                    </MudItem>
-                </MudGrid>
-            </MudTabPanel>
+<div class="accordion mb-4" id="importAcc">
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#importBody">
+                <i class="bi bi-upload me-2"></i> Import ADMX Templates
+            </button>
+        </h2>
+        <div id="importBody" class="accordion-collapse collapse" data-bs-parent="#importAcc">
+            <div class="accordion-body">
+                <p class="small">Import Chrome policy definitions from ADMX templates. Choose one method:</p>
 
-            @* Tab 2: Manual file upload (fallback for air-gapped environments) *@
-            <MudTabPanel Text="Upload ZIP" Icon="@Icons.Material.Filled.UploadFile">
-                <MudText Typo="Typo.body2" Class="mb-3 mt-3">
-                    Upload <code>policy_templates.zip</code> from
-                    <MudLink Href="https://chromeenterprise.google/browser/download/#manage-policies-tab" Target="_blank">
-                        Chrome Enterprise
-                    </MudLink>. For air-gapped environments only.
-                </MudText>
-                <MudGrid>
-                    <MudItem xs="12" sm="5">
-                        <MudFileUpload T="IBrowserFile" Accept=".zip" FilesChanged="OnFileSelected" MaximumFileCount="1">
-                            <ActivatorContent>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">
-                                    Select ZIP File
-                                </MudButton>
-                            </ActivatorContent>
-                        </MudFileUpload>
-                        @if (_selectedFile is not null)
-                        {
-                            <MudText Typo="Typo.body2" Class="mt-2">Selected: @_selectedFile.Name (@((_selectedFile.Size / 1024 / 1024).ToString("F1")) MB)</MudText>
-                        }
-                    </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudTextField @bind-Value="_importVersion" Label="Version Label" Placeholder="e.g. 136.0.7103.48" Variant="Variant.Outlined" />
-                    </MudItem>
-                    <MudItem xs="12" sm="2">
-                        <MudSelect @bind-Value="_importMode" Label="Mode" Variant="Variant.Outlined">
-                            <MudSelectItem Value="@("full")">Full</MudSelectItem>
-                            <MudSelectItem Value="@("diff")">Diff</MudSelectItem>
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="12" sm="2" Class="d-flex align-end">
-                        <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_selectedFile is null || _importing)"
-                                   OnClick="ImportAsync" StartIcon="@Icons.Material.Filled.DataObject">
-                            @if (_importing)
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                <text>Importing...</text>
-                            }
-                            else
-                            {
-                                <text>Import</text>
-                            }
-                        </MudButton>
-                    </MudItem>
-                </MudGrid>
-            </MudTabPanel>
-        </MudTabs>
+                <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item">
+                        <button class="nav-link @(_importTab == 0 ? "active" : "")" @onclick="() => _importTab = 0">
+                            <i class="bi bi-cloud-download me-1"></i> Download from Google
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link @(_importTab == 1 ? "active" : "")" @onclick="() => _importTab = 1">
+                            <i class="bi bi-file-earmark-zip me-1"></i> Upload ZIP
+                        </button>
+                    </li>
+                </ul>
 
-        @if (!string.IsNullOrEmpty(_importError))
-        {
-            <MudAlert Severity="Severity.Error" Class="mt-3" ShowCloseIcon="true" CloseIconClicked="() => _importError = null">
-                ❌ @_importError
-            </MudAlert>
-        }
-        @if (_importResult is not null)
-        {
-            <MudAlert Severity="Severity.Success" Class="mt-3">
-                ✅ @_importResult.Message — @_importResult.Mandatory mandatory, @_importResult.Recommended recommended across @_importResult.Categories categories
-            </MudAlert>
-            @if (_importResult.Added > 0 || _importResult.Removed > 0 || _importResult.Updated > 0)
-            {
-                <MudAlert Severity="Severity.Info" Class="mt-2" Dense="true">
-                    Delta: +@_importResult.Added added, ~@_importResult.Updated updated, -@_importResult.Removed removed
-                </MudAlert>
-            }
-            @if (_importResult.Warnings.Count > 0)
-            {
-                <MudAlert Severity="Severity.Warning" Class="mt-2">
-                    @_importResult.Warnings.Count warning(s) during import
-                </MudAlert>
-            }
-        }
-    </MudExpansionPanel>
-</MudExpansionPanels>
-
-@* Filters *@
-@if (_entries.Count > 0 || _loading)
-{
-    <MudPaper Class="pa-4 mb-4" Elevation="1">
-        <MudGrid>
-            <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_searchText" Label="Search policies" Placeholder="e.g. SafeBrowsing, password..."
-                              Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                              Immediate="true" DebounceInterval="300" TextChanged="OnSearchChanged" />
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudSelect T="string" Value="_selectedCategory" Label="Category" Variant="Variant.Outlined" Clearable="true"
-                           ValueChanged="OnCategoryChanged">
-                    @foreach (var cat in _categories)
-                    {
-                        <MudSelectItem Value="@cat">@cat</MudSelectItem>
-                    }
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudSelect T="string" Value="_selectedScope" Label="Scope" Variant="Variant.Outlined" Clearable="true"
-                           ValueChanged="OnScopeChanged">
-                    <MudSelectItem Value="@("mandatory")">Mandatory</MudSelectItem>
-                    <MudSelectItem Value="@("recommended")">Recommended</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="3" Class="d-flex align-center">
-                <MudText Typo="Typo.body2" Color="Color.Secondary">
-                    Showing @_filteredEntries.Count of @_entries.Count policies
-                </MudText>
-            </MudItem>
-        </MudGrid>
-    </MudPaper>
-
-    @* Policy table *@
-    <MudTable Items="_filteredEntries" Hover="true" Dense="true" Striped="true" Loading="_loading"
-              FixedHeader="true" Height="600px">
-        <HeaderContent>
-            <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.DisplayName)">Policy</MudTableSortLabel></MudTh>
-            <MudTh><MudTableSortLabel SortBy="new Func<PolicyCatalogEntryDto, object>(x => x.Category)">Category</MudTableSortLabel></MudTh>
-            <MudTh>Type</MudTh>
-            <MudTh>Scope</MudTh>
-            <MudTh>Actions</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd DataLabel="Policy">
-                <MudText Typo="Typo.body2" Style="font-weight:600;">@context.DisplayName</MudText>
-                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@context.RegistryKey\@context.RegistryValueName</MudText>
-            </MudTd>
-            <MudTd DataLabel="Category">
-                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@context.Category</MudChip>
-            </MudTd>
-            <MudTd DataLabel="Type">
-                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.DataType)" Variant="Variant.Filled">@context.DataType</MudChip>
-            </MudTd>
-            <MudTd DataLabel="Scope">
-                @if (context.IsRecommended)
+                @if (_importTab == 0)
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">Recommended</MudChip>
+                    <p class="small">The server downloads the latest Chrome ADMX templates directly from Google Enterprise.
+                        This is the recommended method (avoids 113MB upload through the browser).</p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-sm-4">
+                            <label class="form-label">Version Label</label>
+                            <input class="form-control" @bind="_importVersion" placeholder="e.g. 136.0.7103.48" />
+                        </div>
+                        <div class="col-12 col-sm-3">
+                            <label class="form-label">Import Mode</label>
+                            <select class="form-select" @bind="_importMode">
+                                <option value="full">Full (replace all)</option>
+                                <option value="diff">Differential (delta only)</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-sm-3">
+                            <button class="btn btn-success w-100" disabled="@_importing" @onclick="ImportFromUrlAsync">
+                                @if (_importing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span><text>Downloading...</text>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-download me-1"></i><text>Import from Google</text>
+                                }
+                            </button>
+                        </div>
+                    </div>
                 }
                 else
                 {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Mandatory</MudChip>
+                    <p class="small">Upload <code>policy_templates.zip</code> from
+                        <a href="https://chromeenterprise.google/browser/download/#manage-policies-tab" target="_blank">Chrome Enterprise</a>.
+                        For air-gapped environments only.</p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-sm-5">
+                            <label class="form-label">ZIP File</label>
+                            <InputFile class="form-control" accept=".zip" OnChange="OnFileSelected" />
+                            @if (_selectedFile is not null)
+                            {
+                                <div class="form-text">Selected: @_selectedFile.Name (@((_selectedFile.Size / 1024d / 1024d).ToString("F1")) MB)</div>
+                            }
+                        </div>
+                        <div class="col-12 col-sm-3">
+                            <label class="form-label">Version Label</label>
+                            <input class="form-control" @bind="_importVersion" placeholder="e.g. 136.0.7103.48" />
+                        </div>
+                        <div class="col-6 col-sm-2">
+                            <label class="form-label">Mode</label>
+                            <select class="form-select" @bind="_importMode">
+                                <option value="full">Full</option>
+                                <option value="diff">Diff</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-sm-2">
+                            <button class="btn btn-success w-100" disabled="@(_selectedFile is null || _importing)" @onclick="ImportAsync">
+                                @if (_importing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span><text>...</text>
+                                }
+                                else
+                                {
+                                    <text>Import</text>
+                                }
+                            </button>
+                        </div>
+                    </div>
                 }
-            </MudTd>
-            <MudTd>
-                @{ var entry = context; }
-                <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small"
-                               OnClick="@(async () => await ShowDetails(entry))" />
-                <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Primary"
-                               OnClick="@(async () => await AddToPolicySet(entry))" />
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
+
+                @if (!string.IsNullOrEmpty(_importError))
+                {
+                    <div class="alert alert-danger alert-dismissible mt-3">
+                        ❌ @_importError
+                        <button type="button" class="btn-close" @onclick="() => _importError = null"></button>
+                    </div>
+                }
+                @if (_importResult is not null)
+                {
+                    <div class="alert alert-success mt-3">
+                        ✅ @_importResult.Message — @_importResult.Mandatory mandatory, @_importResult.Recommended recommended across @_importResult.Categories categories
+                    </div>
+                    @if (_importResult.Added > 0 || _importResult.Removed > 0 || _importResult.Updated > 0)
+                    {
+                        <div class="alert alert-info py-2 mt-2">
+                            Delta: +@_importResult.Added added, ~@_importResult.Updated updated, -@_importResult.Removed removed
+                        </div>
+                    }
+                    @if (_importResult.Warnings.Count > 0)
+                    {
+                        <div class="alert alert-warning py-2 mt-2">@_importResult.Warnings.Count warning(s) during import</div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Filters + table *@
+@if (_entries.Count > 0 || _loading)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-sm-4">
+                    <label class="form-label">Search policies</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input class="form-control" placeholder="e.g. SafeBrowsing, password..."
+                               value="@_searchText" @oninput="OnSearchChanged" />
+                    </div>
+                </div>
+                <div class="col-12 col-sm-3">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" value="@_selectedCategory" @onchange="OnCategoryChanged">
+                        <option value="">All categories</option>
+                        @foreach (var cat in _categories)
+                        {
+                            <option value="@cat">@cat</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-12 col-sm-2">
+                    <label class="form-label">Scope</label>
+                    <select class="form-select" value="@_selectedScope" @onchange="OnScopeChanged">
+                        <option value="">All</option>
+                        <option value="mandatory">Mandatory</option>
+                        <option value="recommended">Recommended</option>
+                    </select>
+                </div>
+                <div class="col-12 col-sm-3 text-secondary small">
+                    Showing @_filteredEntries.Count of @_entries.Count policies
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="table-responsive" style="max-height:600px; overflow-y:auto;">
+            <table class="table table-hover table-striped align-middle mb-0">
+                <thead class="position-sticky top-0 bg-body">
+                    <tr><th>Policy</th><th>Category</th><th>Type</th><th>Scope</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    @if (_loading)
+                    {
+                        <tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>
+                    }
+                    @foreach (var entry in _filteredEntries)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@entry.DisplayName</div>
+                                <div class="small text-secondary mono">@entry.RegistryKey\@entry.RegistryValueName</div>
+                            </td>
+                            <td><span class="badge text-bg-light border">@entry.Category</span></td>
+                            <td><span class="badge text-bg-@TypeBadge(entry.DataType)">@entry.DataType</span></td>
+                            <td>
+                                @if (entry.IsRecommended) { <span class="badge text-bg-warning">Recommended</span> }
+                                else { <span class="badge text-bg-success">Mandatory</span> }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-link p-0 me-2" title="Details"
+                                        @onclick="() => ShowDetails(entry)"><i class="bi bi-info-circle"></i></button>
+                                <button class="btn btn-sm btn-link text-primary p-0" title="Add to policy set"
+                                        @onclick="() => AddToPolicySet(entry)"><i class="bi bi-plus-lg"></i></button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
+
+<PolicyDetailsDialog @bind-Visible="_showDetails" Entry="_detailsEntry" />
+<AddToPolicySetDialog @bind-Visible="_showAdd" Entry="_addEntry" PolicySets="_policySets" Api="Api" OnAdd="HandleAddToPolicySet" />
 
 @code {
     private List<PolicyCatalogEntryDto> _entries = [];
@@ -249,8 +246,8 @@ else if (_stats is null && !_loading)
     private string _searchText = "";
     private string? _selectedCategory;
     private string? _selectedScope;
+    private int _importTab = 0;
 
-    // Import state
     private IBrowserFile? _selectedFile;
     private string _importVersion = "";
     private string _importMode = "full";
@@ -258,7 +255,10 @@ else if (_stats is null && !_loading)
     private CatalogImportResultDto? _importResult;
     private string? _importError;
 
-    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    private bool _showDetails;
+    private PolicyCatalogEntryDto? _detailsEntry;
+    private bool _showAdd;
+    private PolicyCatalogEntryDto? _addEntry;
 
     protected override async Task OnInitializedAsync()
     {
@@ -267,7 +267,6 @@ else if (_stats is null && !_loading)
             var statsTask = Api.GetCatalogStatsAsync();
             var categoriesTask = Api.GetCatalogCategoriesAsync();
             var policySetsTask = Api.GetPoliciesAsync();
-
             await Task.WhenAll(statsTask, categoriesTask, policySetsTask);
 
             _stats = statsTask.Result;
@@ -280,113 +279,62 @@ else if (_stats is null && !_loading)
                 ApplyFilters();
             }
         }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Failed to load catalog: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _loading = false;
-        }
+        catch (Exception ex) { Toast.Error($"Failed to load catalog: {ex.Message}"); }
+        finally { _loading = false; }
     }
 
-    private void OnFileSelected(IBrowserFile file) => _selectedFile = file;
+    private void OnFileSelected(InputFileChangeEventArgs e) => _selectedFile = e.File;
 
     private async Task ImportFromUrlAsync()
     {
-        _importing = true;
-        _importResult = null;
-        _importError = null;
-        StateHasChanged();
-
+        _importing = true; _importResult = null; _importError = null;
         try
         {
             _importResult = await Api.ImportCatalogFromUrlAsync(_importVersion, _importMode == "diff");
-
-            // Reload data
-            _stats = await Api.GetCatalogStatsAsync();
-            _categories = await Api.GetCatalogCategoriesAsync();
-            _entries = await Api.GetCatalogAsync();
-            ApplyFilters();
-
-            Snackbar.Add($"Successfully imported {_importResult.TotalParsed} policies!", Severity.Success);
+            await ReloadAfterImport();
+            Toast.Success($"Successfully imported {_importResult.TotalParsed} policies!");
         }
-        catch (Exception ex)
-        {
-            _importError = ex.Message;
-            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _importing = false;
-            StateHasChanged();
-        }
+        catch (Exception ex) { _importError = ex.Message; Toast.Error($"Import failed: {ex.Message}"); }
+        finally { _importing = false; }
     }
 
     private async Task ImportAsync()
     {
         if (_selectedFile is null) return;
-        _importing = true;
-        _importResult = null;
-        _importError = null;
-        StateHasChanged();
-
+        _importing = true; _importResult = null; _importError = null;
         try
         {
             using var stream = _selectedFile.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024);
             _importResult = await Api.ImportCatalogAsync(stream, _selectedFile.Name, _importVersion, _importMode == "diff");
-
-            // Reload data
-            _stats = await Api.GetCatalogStatsAsync();
-            _categories = await Api.GetCatalogCategoriesAsync();
-            _entries = await Api.GetCatalogAsync();
-            ApplyFilters();
-
-            Snackbar.Add($"Successfully imported {_importResult.TotalParsed} policies!", Severity.Success);
+            await ReloadAfterImport();
+            Toast.Success($"Successfully imported {_importResult.TotalParsed} policies!");
         }
-        catch (Exception ex)
-        {
-            _importError = ex.Message;
-            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _importing = false;
-            StateHasChanged();
-        }
+        catch (Exception ex) { _importError = ex.Message; Toast.Error($"Import failed: {ex.Message}"); }
+        finally { _importing = false; }
     }
 
-    private void OnSearchChanged(string text)
+    private async Task ReloadAfterImport()
     {
-        _searchText = text;
+        _stats = await Api.GetCatalogStatsAsync();
+        _categories = await Api.GetCatalogCategoriesAsync();
+        _entries = await Api.GetCatalogAsync();
         ApplyFilters();
     }
 
-    private void OnCategoryChanged(string? val)
-    {
-        _selectedCategory = val;
-        ApplyFilters();
-    }
-
-    private void OnScopeChanged(string? val)
-    {
-        _selectedScope = val;
-        ApplyFilters();
-    }
+    private void OnSearchChanged(ChangeEventArgs e) { _searchText = e.Value?.ToString() ?? ""; ApplyFilters(); }
+    private void OnCategoryChanged(ChangeEventArgs e) { _selectedCategory = e.Value?.ToString(); ApplyFilters(); }
+    private void OnScopeChanged(ChangeEventArgs e) { _selectedScope = e.Value?.ToString(); ApplyFilters(); }
 
     private void ApplyFilters()
     {
         _filteredEntries = _entries;
-
         if (!string.IsNullOrEmpty(_searchText))
             _filteredEntries = _filteredEntries.Where(e =>
                 e.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
                 e.DisplayName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
                 e.RegistryValueName.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
-
         if (!string.IsNullOrEmpty(_selectedCategory))
             _filteredEntries = _filteredEntries.Where(e => e.Category == _selectedCategory).ToList();
-
         if (_selectedScope == "mandatory")
             _filteredEntries = _filteredEntries.Where(e => !e.IsRecommended).ToList();
         else if (_selectedScope == "recommended")
@@ -395,66 +343,47 @@ else if (_stats is null && !_loading)
 
     private async Task ShowDetails(PolicyCatalogEntryDto entry)
     {
-        // Fetch full details (description, enum options, registry key) on demand
-        var fullEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
-        var parameters = new DialogParameters<PolicyDetailsDialog>
-        {
-            { x => x.Entry, fullEntry }
-        };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
-        await DialogService.ShowAsync<PolicyDetailsDialog>(entry.Name, parameters, options);
+        _detailsEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
+        _showDetails = true;
     }
 
     private async Task AddToPolicySet(PolicyCatalogEntryDto entry)
     {
-        // Fetch full entry (with EnumOptions, Description) before opening dialog
-        var fullEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
-        var parameters = new DialogParameters<AddToPolicySetDialog>
-        {
-            { x => x.Entry, fullEntry },
-            { x => x.PolicySets, _policySets },
-            { x => x.Api, Api }
-        };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<AddToPolicySetDialog>($"Add {entry.DisplayName}", parameters, options);
-        var result = await dialog.Result;
+        _addEntry = await Api.GetCatalogEntryAsync(entry.Id) ?? entry;
+        _showAdd = true;
+    }
 
-        if (result is not null && !result.Canceled && result.Data is AddToPolicySetResult addResult)
+    private async Task HandleAddToPolicySet(AddToPolicySetResult addResult)
+    {
+        var entry = _addEntry;
+        if (entry is null) return;
+        try
         {
-            try
+            object value = entry.DataType switch
             {
-                // Determine the actual value to store
-                object value = entry.DataType switch
-                {
-                    "Boolean" => addResult.Value is bool b ? (b ? 1 : 0) : addResult.Value,
-                    "Integer" => addResult.Value,
-                    "List" => addResult.Value is string s
-                        ? s.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToArray()
-                        : addResult.Value,
-                    _ => addResult.Value
-                };
-
-                // Call API to add setting to the PolicySet's draft
-                await Api.AddSettingToDraftAsync(addResult.PolicySet.Id, entry.Name, value);
-                Snackbar.Add($"✅ Added \"{entry.Name}\" to \"{addResult.PolicySet.Name}\" draft", Severity.Success);
-            }
-            catch (Exception ex)
-            {
-                Snackbar.Add($"❌ Failed to add: {ex.Message}", Severity.Error);
-            }
+                "Boolean" => addResult.Value is bool b ? (b ? 1 : 0) : addResult.Value,
+                "Integer" => addResult.Value,
+                "List" => addResult.Value is string s
+                    ? s.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToArray()
+                    : addResult.Value,
+                _ => addResult.Value
+            };
+            await Api.AddSettingToDraftAsync(addResult.PolicySet.Id, entry.Name, value);
+            Toast.Success($"✅ Added \"{entry.Name}\" to \"{addResult.PolicySet.Name}\" draft");
+        }
+        catch (Exception ex)
+        {
+            Toast.Error($"❌ Failed to add: {ex.Message}");
         }
     }
 
-    private static string TruncateText(string text, int max) =>
-        text.Length <= max ? text : text[..max] + "...";
-
-    private static Color GetTypeColor(string dataType) => dataType switch
+    private static string TypeBadge(string dataType) => dataType switch
     {
-        "Boolean" => Color.Success,
-        "Integer" => Color.Info,
-        "String" => Color.Warning,
-        "Enum" => Color.Secondary,
-        "List" => Color.Tertiary,
-        _ => Color.Default
+        "Boolean" => "success",
+        "Integer" => "info",
+        "String" => "warning",
+        "Enum" => "secondary",
+        "List" => "primary",
+        _ => "light"
     };
 }

@@ -3,78 +3,90 @@
 
 <PageTitle>Dashboard - Chrome Policy Manager</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+<div class="page-header">
+    <i class="bi bi-speedometer2 fs-3"></i>
+    <h1 class="h3 mb-0">Dashboard</h1>
+</div>
 
 @if (_loading)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    <div class="d-flex justify-content-center py-5">
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div>
+    </div>
 }
 else if (_dashboard is not null)
 {
-    <MudGrid>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="2">
-                <MudStack AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@Icons.Material.Filled.Devices" Size="Size.Large" Color="Color.Primary" />
-                    <MudText Typo="Typo.h4">@_dashboard.TotalDevices</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Total Devices</MudText>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="2">
-                <MudStack AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Large" Color="Color.Success" />
-                    <MudText Typo="Typo.h4">@_dashboard.CompliantDevices</MudText>
-                    <MudText Typo="Typo.body2">Compliant</MudText>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="2">
-                <MudStack AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@Icons.Material.Filled.Error" Size="Size.Large" Color="Color.Error" />
-                    <MudText Typo="Typo.h4">@_dashboard.ErrorDevices</MudText>
-                    <MudText Typo="Typo.body2">Errors</MudText>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="2">
-                <MudStack AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@Icons.Material.Filled.WifiOff" Size="Size.Large" Color="Color.Warning" />
-                    <MudText Typo="Typo.h4">@_dashboard.OfflineDevices</MudText>
-                    <MudText Typo="Typo.body2">Offline</MudText>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <span class="stat-icon bg-primary-subtle text-primary mb-2"><i class="bi bi-pc-display"></i></span>
+                    <div class="h3 mb-0">@_dashboard.TotalDevices</div>
+                    <div class="text-secondary small">Total Devices</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <span class="stat-icon bg-success-subtle text-success mb-2"><i class="bi bi-check-circle"></i></span>
+                    <div class="h3 mb-0">@_dashboard.CompliantDevices</div>
+                    <div class="text-secondary small">Compliant</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <span class="stat-icon bg-danger-subtle text-danger mb-2"><i class="bi bi-exclamation-octagon"></i></span>
+                    <div class="h3 mb-0">@_dashboard.ErrorDevices</div>
+                    <div class="text-secondary small">Errors</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body text-center">
+                    <span class="stat-icon bg-warning-subtle text-warning mb-2"><i class="bi bi-wifi-off"></i></span>
+                    <div class="h3 mb-0">@_dashboard.OfflineDevices</div>
+                    <div class="text-secondary small">Offline</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-    <MudText Typo="Typo.h6" Class="mt-6 mb-2">Recent Device Reports</MudText>
-    <MudTable Items="@_dashboard.RecentReports" Hover="true" Striped="true" Dense="true" Elevation="1">
-        <HeaderContent>
-            <MudTh>Device</MudTh>
-            <MudTh>Status</MudTh>
-            <MudTh>Policy Hash</MudTh>
-            <MudTh>Chrome</MudTh>
-            <MudTh>Keys Written</MudTh>
-            <MudTh>Last Contact</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd>@context.DeviceName</MudTd>
-            <MudTd>
-                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
-            </MudTd>
-            <MudTd><MudText Typo="Typo.caption">@Truncate(context.AppliedPolicyHash, 12)</MudText></MudTd>
-            <MudTd>@(context.ChromeVersion ?? "—")</MudTd>
-            <MudTd>@context.PolicyKeysWritten</MudTd>
-            <MudTd>@context.LastContact.ToLocalTime().ToString("g")</MudTd>
-        </RowTemplate>
-    </MudTable>
+    <h2 class="h5 mb-3">Recent Device Reports</h2>
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Device</th><th>Status</th><th>Policy Hash</th>
+                        <th>Chrome</th><th>Keys Written</th><th>Last Contact</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _dashboard.RecentReports)
+                    {
+                        <tr>
+                            <td>@r.DeviceName</td>
+                            <td><span class="badge text-bg-@StatusBadge(r.Status)">@r.Status</span></td>
+                            <td class="mono small">@Truncate(r.AppliedPolicyHash, 12)</td>
+                            <td>@(r.ChromeVersion ?? "—")</td>
+                            <td>@r.PolicyKeysWritten</td>
+                            <td>@r.LastContact.ToLocalTime().ToString("g")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
 else
 {
-    <MudAlert Severity="Severity.Info">No monitoring data available yet. Devices will report in after the first remediation run.</MudAlert>
+    <div class="alert alert-info">
+        No monitoring data available yet. Devices will report in after the first remediation run.
+    </div>
 }
 
 @code {
@@ -88,12 +100,12 @@ else
         finally { _loading = false; }
     }
 
-    private Color GetStatusColor(string status) => status switch
+    private static string StatusBadge(string status) => status switch
     {
-        "Compliant" => Color.Success,
-        "PartiallyApplied" => Color.Warning,
-        "Error" => Color.Error,
-        _ => Color.Default
+        "Compliant" => "success",
+        "PartiallyApplied" => "warning",
+        "Error" => "danger",
+        _ => "secondary"
     };
 
     private static string Truncate(string? value, int maxLength)

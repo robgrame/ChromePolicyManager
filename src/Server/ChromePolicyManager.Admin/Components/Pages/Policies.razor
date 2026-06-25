@@ -1,101 +1,110 @@
 @page "/policies"
 @inject PolicyApiClient Api
-@inject IDialogService DialogService
-@inject ISnackbar Snackbar
+@inject ToastService Toast
+@inject ConfirmService Confirm
 
 <PageTitle>Policies - Chrome Policy Manager</PageTitle>
 
-<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
-    <MudText Typo="Typo.h4">Policy Sets</MudText>
-    <MudSpacer />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="@OpenCreateDialog">New Policy Set</MudButton>
-</MudStack>
+<div class="d-flex align-items-center mb-4">
+    <div class="page-header mb-0">
+        <i class="bi bi-shield-check fs-3"></i>
+        <h1 class="h3 mb-0">Policy Sets</h1>
+    </div>
+    <button class="btn btn-primary ms-auto" @onclick="() => _showCreate = true">
+        <i class="bi bi-plus-lg me-1"></i> New Policy Set
+    </button>
+</div>
 
 @if (_loading)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
 else
 {
-    <MudGrid>
+    <div class="row g-3">
         @foreach (var policy in _policies)
         {
-            <MudItem xs="12" md="6" lg="4">
-                <MudCard Elevation="2">
-                    <MudCardHeader>
-                        <CardHeaderContent>
-                            <MudText Typo="Typo.h6">@policy.Name</MudText>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">@policy.Description</MudText>
-                        </CardHeaderContent>
-                        <CardHeaderActions>
-                            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" 
-                                           OnClick="@(() => OpenVersionDialog(policy))" Title="Add Version" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                                           OnClick="@(() => DeletePolicySet(policy))" Title="Delete Policy Set" />
-                        </CardHeaderActions>
-                    </MudCardHeader>
-                    <MudCardContent>
-                        <MudText Typo="Typo.body2" Class="mb-2">
-                            <strong>@policy.Versions.Count</strong> version(s)
-                        </MudText>
+            <div class="col-12 col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header d-flex align-items-start">
+                        <div>
+                            <h6 class="mb-0">@policy.Name</h6>
+                            <small class="text-secondary">@policy.Description</small>
+                        </div>
+                        <div class="ms-auto d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-primary" title="Add Version"
+                                    @onclick="() => OpenVersionDialog(policy)"><i class="bi bi-plus-lg"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" title="Delete Policy Set"
+                                    @onclick="() => DeletePolicySet(policy)"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2"><strong>@policy.Versions.Count</strong> version(s)</p>
                         @if (policy.Versions.Any())
                         {
-                            <MudSimpleTable Dense="true" Hover="true" Elevation="0">
-                                <thead>
-                                    <tr><th>Version</th><th>Status</th><th>Actions</th></tr>
-                                </thead>
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead><tr><th>Version</th><th>Status</th><th>Actions</th></tr></thead>
                                 <tbody>
                                     @foreach (var v in policy.Versions.OrderByDescending(x => x.CreatedAt))
                                     {
                                         <tr>
                                             <td>@v.Version</td>
-                                            <td>
-                                                <MudChip T="string" Size="Size.Small" Color="@GetVersionColor(v.Status)">
-                                                    @v.Status
-                                                </MudChip>
-                                            </td>
+                                            <td><span class="badge text-bg-@VersionBadge(v.Status)">@v.Status</span></td>
                                             <td>
                                                 @if (v.Status == PolicyVersionStatus.Draft)
                                                 {
-                                                    <MudIconButton Icon="@Icons.Material.Filled.Publish" Size="Size.Small"
-                                                                   Color="Color.Success" OnClick="@(() => PromoteVersion(v))"
-                                                                   Title="Promote to Active" />
+                                                    <button class="btn btn-sm btn-link text-success p-0 me-2" title="Promote to Active"
+                                                            @onclick="() => PromoteVersion(v)"><i class="bi bi-upload"></i></button>
                                                 }
                                                 @if (v.Status == PolicyVersionStatus.Archived)
                                                 {
-                                                    <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
-                                                                   Color="Color.Warning" OnClick="@(() => RollbackToVersion(policy, v))"
-                                                                   Title="Rollback to this version" />
+                                                    <button class="btn btn-sm btn-link text-warning p-0 me-2" title="Rollback to this version"
+                                                            @onclick="() => RollbackToVersion(policy, v)"><i class="bi bi-arrow-counterclockwise"></i></button>
                                                 }
                                                 @if (v.Status == PolicyVersionStatus.Active)
                                                 {
-                                                    <MudIconButton Icon="@Icons.Material.Filled.GroupAdd" Size="Size.Small"
-                                                                   Color="Color.Primary" OnClick="@(() => AssignToGroup(policy, v))"
-                                                                   Title="Assign to Entra Group" />
+                                                    <button class="btn btn-sm btn-link text-primary p-0 me-2" title="Assign to Entra Group"
+                                                            @onclick="() => AssignToGroup(policy, v)"><i class="bi bi-person-plus"></i></button>
                                                 }
-                                                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
-                                                               OnClick="@(() => ViewSettings(v))" Title="View Settings" />
+                                                <button class="btn btn-sm btn-link p-0" title="View Settings"
+                                                        @onclick="() => ViewSettings(v)"><i class="bi bi-eye"></i></button>
                                             </td>
                                         </tr>
                                     }
                                 </tbody>
-                            </MudSimpleTable>
+                            </table>
                         }
                         else
                         {
-                            <MudAlert Severity="Severity.Info" Dense="true">No versions yet</MudAlert>
+                            <div class="alert alert-info py-2 mb-0">No versions yet</div>
                         }
-                    </MudCardContent>
-                </MudCard>
-            </MudItem>
+                    </div>
+                </div>
+            </div>
         }
-    </MudGrid>
+    </div>
 }
+
+<CreatePolicyDialog @bind-Visible="_showCreate" OnCompleted="LoadPolicies" />
+<CreateVersionDialog @bind-Visible="_showVersion" PolicySet="_versionTarget" OnCompleted="LoadPolicies" />
+<CreateAssignmentDialog @bind-Visible="_showAssign" PolicySetName="_assignName"
+                        PolicySetVersionId="_assignVersionId" VersionLabel="_assignLabel"
+                        OnCompleted="OnAssignmentCreated" />
+<ViewSettingsDialog @bind-Visible="_showSettings" Version="_settingsVersion" />
 
 @code {
     private List<PolicySetDto> _policies = [];
     private bool _loading = true;
+
+    private bool _showCreate;
+    private bool _showVersion;
+    private PolicySetDto? _versionTarget;
+    private bool _showAssign;
+    private string? _assignName;
+    private Guid? _assignVersionId;
+    private string? _assignLabel;
+    private bool _showSettings;
+    private PolicySetVersionDto? _settingsVersion;
 
     protected override async Task OnInitializedAsync() => await LoadPolicies();
 
@@ -103,27 +112,14 @@ else
     {
         _loading = true;
         try { _policies = await Api.GetPoliciesAsync(); }
-        catch (Exception ex) { Snackbar.Add($"Failed to load policies: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Toast.Error($"Failed to load policies: {ex.Message}"); }
         finally { _loading = false; }
     }
 
-    private async Task OpenCreateDialog()
+    private void OpenVersionDialog(PolicySetDto policy)
     {
-        var dialog = await DialogService.ShowAsync<CreatePolicyDialog>("New Policy Set",
-            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled)
-            await LoadPolicies();
-    }
-
-    private async Task OpenVersionDialog(PolicySetDto policy)
-    {
-        var parameters = new DialogParameters { ["PolicySet"] = policy };
-        var dialog = await DialogService.ShowAsync<CreateVersionDialog>($"New Version - {policy.Name}", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled)
-            await LoadPolicies();
+        _versionTarget = policy;
+        _showVersion = true;
     }
 
     private async Task PromoteVersion(PolicySetVersionDto version)
@@ -131,91 +127,81 @@ else
         try
         {
             await Api.PromoteVersionAsync(version.Id);
-            Snackbar.Add($"Version {version.Version} promoted to Active!", Severity.Success);
+            Toast.Success($"Version {version.Version} promoted to Active!");
             await LoadPolicies();
         }
-        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
     }
 
     private async Task RollbackToVersion(PolicySetDto policy, PolicySetVersionDto version)
     {
-        var confirm = await DialogService.ShowMessageBox("Rollback",
+        var confirm = await Confirm.ConfirmAsync("Rollback",
             $"Reactivate version {version.Version}? The current active version will be archived.",
-            yesText: "Rollback", cancelText: "Cancel");
-        if (confirm == true)
+            confirmText: "Rollback");
+        if (confirm)
         {
             try
             {
-                var response = await Api.RollbackVersionAsync(policy.Id, version.Id);
-                Snackbar.Add($"Rolled back to version {version.Version}!", Severity.Success);
+                await Api.RollbackVersionAsync(policy.Id, version.Id);
+                Toast.Success($"Rolled back to version {version.Version}!");
                 await LoadPolicies();
             }
-            catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+            catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
         }
     }
 
-    private async Task AssignToGroup(PolicySetDto policy, PolicySetVersionDto version)
+    private void AssignToGroup(PolicySetDto policy, PolicySetVersionDto version)
     {
-        var parameters = new DialogParameters
-        {
-            ["PolicySetName"] = policy.Name,
-            ["PolicySetVersionId"] = version.Id,
-            ["VersionLabel"] = version.Version
-        };
-        var dialog = await DialogService.ShowAsync<CreateAssignmentDialog>(
-            $"Assign \"{policy.Name}\" v{version.Version}", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled)
-            Snackbar.Add("Assignment created!", Severity.Success);
+        _assignName = policy.Name;
+        _assignVersionId = version.Id;
+        _assignLabel = version.Version;
+        _showAssign = true;
     }
 
     private async Task DeletePolicySet(PolicySetDto policy)
     {
-        var confirm = await DialogService.ShowMessageBox("Delete Policy Set",
+        var confirm = await Confirm.ConfirmAsync("Delete Policy Set",
             $"Delete \"{policy.Name}\" and all its versions? This cannot be undone.",
-            yesText: "Delete", cancelText: "Cancel");
-        if (confirm == true)
+            confirmText: "Delete", danger: true);
+        if (!confirm) return;
+        try
         {
-            try
-            {
-                await Api.DeletePolicySetAsync(policy.Id);
-                Snackbar.Add($"Policy set '{policy.Name}' deleted", Severity.Success);
-                await LoadPolicies();
-            }
-            catch (InvalidOperationException)
-            {
-                // Has orphaned assignments — offer force delete
-                var forceConfirm = await DialogService.ShowMessageBox("Force Delete",
-                    $"This policy set has orphaned assignments that block deletion. Force delete will remove them too. Continue?",
-                    yesText: "Force Delete", cancelText: "Cancel");
-                if (forceConfirm == true)
-                {
-                    try
-                    {
-                        await Api.DeletePolicySetAsync(policy.Id, force: true);
-                        Snackbar.Add($"Policy set '{policy.Name}' force deleted with orphaned assignments", Severity.Success);
-                        await LoadPolicies();
-                    }
-                    catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
-                }
-            }
-            catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+            await Api.DeletePolicySetAsync(policy.Id);
+            Toast.Success($"Policy set '{policy.Name}' deleted");
+            await LoadPolicies();
         }
+        catch (InvalidOperationException)
+        {
+            var forceConfirm = await Confirm.ConfirmAsync("Force Delete",
+                "This policy set has orphaned assignments that block deletion. Force delete will remove them too. Continue?",
+                confirmText: "Force Delete", danger: true);
+            if (forceConfirm)
+            {
+                try
+                {
+                    await Api.DeletePolicySetAsync(policy.Id, force: true);
+                    Toast.Success($"Policy set '{policy.Name}' force deleted with orphaned assignments");
+                    await LoadPolicies();
+                }
+                catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
+            }
+        }
+        catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
     }
 
-    private async Task ViewSettings(PolicySetVersionDto version)
+    private void ViewSettings(PolicySetVersionDto version)
     {
-        var parameters = new DialogParameters { ["Version"] = version };
-        await DialogService.ShowAsync<ViewSettingsDialog>($"Settings - v{version.Version}", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        _settingsVersion = version;
+        _showSettings = true;
     }
 
-    private Color GetVersionColor(PolicyVersionStatus status) => status switch
+    private void OnAssignmentCreated() => Toast.Success("Assignment created!");
+
+    private static string VersionBadge(PolicyVersionStatus status) => status switch
     {
-        PolicyVersionStatus.Active => Color.Success,
-        PolicyVersionStatus.Draft => Color.Info,
-        PolicyVersionStatus.Archived => Color.Default,
-        _ => Color.Default
+        PolicyVersionStatus.Active => "success",
+        PolicyVersionStatus.Draft => "info",
+        PolicyVersionStatus.Archived => "secondary",
+        _ => "secondary"
     };
 }

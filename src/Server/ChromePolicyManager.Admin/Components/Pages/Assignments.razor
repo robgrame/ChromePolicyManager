@@ -1,75 +1,83 @@
 @page "/assignments"
 @inject PolicyApiClient Api
-@inject IDialogService DialogService
-@inject ISnackbar Snackbar
+@inject ToastService Toast
+@inject ConfirmService Confirm
 
 <PageTitle>Assignments - Chrome Policy Manager</PageTitle>
 
-<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
-    <MudText Typo="Typo.h4">Policy Assignments</MudText>
-    <MudSpacer />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="@OpenCreateDialog">New Assignment</MudButton>
-</MudStack>
+<div class="d-flex align-items-center mb-4">
+    <div class="page-header mb-0">
+        <i class="bi bi-diagram-3 fs-3"></i>
+        <h1 class="h3 mb-0">Policy Assignments</h1>
+    </div>
+    <button class="btn btn-primary ms-auto" @onclick="() => _showCreate = true">
+        <i class="bi bi-plus-lg me-1"></i> New Assignment
+    </button>
+</div>
 
 @if (_loading)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
 else
 {
-    <MudTable Items="@_assignments" Hover="true" Striped="true" Elevation="1" Dense="true">
-        <HeaderContent>
-            <MudTh>Group</MudTh>
-            <MudTh>Scope</MudTh>
-            <MudTh>Priority</MudTh>
-            <MudTh>Policy Version</MudTh>
-            <MudTh>Enabled</MudTh>
-            <MudTh>Push Remediation</MudTh>
-            <MudTh>Actions</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd>
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                    <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Small" />
-                    <MudText>@context.GroupName</MudText>
-                </MudStack>
-            </MudTd>
-            <MudTd>
-                <MudChip T="string" Size="Size.Small" Color="@(context.Scope == 0 ? Color.Error : Color.Info)">
-                    @(context.Scope == 0 ? "Mandatory" : "Recommended")
-                </MudChip>
-            </MudTd>
-            <MudTd>
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Priority</MudChip>
-            </MudTd>
-            <MudTd><MudText Typo="Typo.caption">@context.PolicySetVersionId.ToString()[..8]…</MudText></MudTd>
-            <MudTd>
-                <MudIcon Icon="@(context.Enabled ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
-                         Color="@(context.Enabled ? Color.Success : Color.Error)" Size="Size.Small" />
-            </MudTd>
-            <MudTd>
-                <MudSwitch T="bool"
-                           Value="@context.PushRemediationEnabled"
-                           ValueChanged="@((enabled) => TogglePushRemediation(context, enabled))"
-                           Color="Color.Primary" />
-            </MudTd>
-            <MudTd>
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
-                               OnClick="@(() => EditAssignment(context))" Title="Edit" />
-                <MudIconButton Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Small" Color="Color.Primary"
-                               OnClick="@(() => TriggerPushRemediation(context))"
-                               Disabled="@(!context.PushRemediationEnabled)" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => DeleteAssignment(context))" />
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Group</th><th>Scope</th><th>Priority</th><th>Policy Version</th>
+                        <th>Enabled</th><th>Push Remediation</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in _assignments)
+                    {
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    <i class="bi bi-people text-brand"></i> @a.GroupName
+                                </div>
+                            </td>
+                            <td><span class="badge text-bg-@(a.Scope == 0 ? "danger" : "info")">@(a.Scope == 0 ? "Mandatory" : "Recommended")</span></td>
+                            <td><span class="badge text-bg-light border">@a.Priority</span></td>
+                            <td class="mono small">@a.PolicySetVersionId.ToString()[..8]…</td>
+                            <td>
+                                @if (a.Enabled) { <i class="bi bi-check-circle-fill text-success"></i> }
+                                else { <i class="bi bi-x-circle-fill text-danger"></i> }
+                            </td>
+                            <td>
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" checked="@a.PushRemediationEnabled"
+                                           @onchange="(e) => TogglePushRemediation(a, (bool)e.Value!)" />
+                                </div>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-link text-primary p-0 me-2" title="Edit"
+                                        @onclick="() => EditAssignment(a)"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-link text-primary p-0 me-2" title="Trigger push remediation"
+                                        disabled="@(!a.PushRemediationEnabled)"
+                                        @onclick="() => TriggerPushRemediation(a)"><i class="bi bi-bell"></i></button>
+                                <button class="btn btn-sm btn-link text-danger p-0" title="Delete"
+                                        @onclick="() => DeleteAssignment(a)"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
+
+<CreateAssignmentDialog @bind-Visible="_showCreate" OnCompleted="LoadAssignments" />
+<EditAssignmentDialog @bind-Visible="_showEdit" Assignment="_editTarget" OnCompleted="LoadAssignments" />
 
 @code {
     private List<AssignmentDto> _assignments = [];
     private bool _loading = true;
+    private bool _showCreate;
+    private bool _showEdit;
+    private AssignmentDto? _editTarget;
 
     protected override async Task OnInitializedAsync() => await LoadAssignments();
 
@@ -77,37 +85,24 @@ else
     {
         _loading = true;
         try { _assignments = await Api.GetAssignmentsAsync(); }
-        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        catch (Exception ex) { Toast.Error($"Error: {ex.Message}"); }
         finally { _loading = false; }
     }
 
-    private async Task OpenCreateDialog()
+    private void EditAssignment(AssignmentDto assignment)
     {
-        var dialog = await DialogService.ShowAsync<CreateAssignmentDialog>("New Assignment",
-            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled)
-            await LoadAssignments();
-    }
-
-    private async Task EditAssignment(AssignmentDto assignment)
-    {
-        var parameters = new DialogParameters { ["Assignment"] = assignment };
-        var dialog = await DialogService.ShowAsync<EditAssignmentDialog>("Edit Assignment", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled)
-            await LoadAssignments();
+        _editTarget = assignment;
+        _showEdit = true;
     }
 
     private async Task DeleteAssignment(AssignmentDto assignment)
     {
-        var confirm = await DialogService.ShowMessageBox("Delete Assignment",
-            $"Remove assignment to {assignment.GroupName}?", yesText: "Delete", cancelText: "Cancel");
-        if (confirm == true)
+        var confirm = await Confirm.ConfirmAsync("Delete Assignment",
+            $"Remove assignment to {assignment.GroupName}?", confirmText: "Delete", danger: true);
+        if (confirm)
         {
             await Api.DeleteAssignmentAsync(assignment.Id);
-            Snackbar.Add("Assignment deleted", Severity.Success);
+            Toast.Success("Assignment deleted");
             await LoadAssignments();
         }
     }
@@ -118,13 +113,13 @@ else
         {
             var updated = await Api.UpdateAssignmentPushRemediationAsync(assignment.Id, enabled, triggerNow: enabled);
             assignment.PushRemediationEnabled = updated.PushRemediationEnabled;
-            Snackbar.Add(enabled
+            Toast.Success(enabled
                 ? $"Push remediation enabled for {assignment.GroupName}"
-                : $"Push remediation disabled for {assignment.GroupName}", Severity.Success);
+                : $"Push remediation disabled for {assignment.GroupName}");
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            Toast.Error($"Error: {ex.Message}");
         }
     }
 
@@ -133,11 +128,12 @@ else
         try
         {
             var result = await Api.TriggerAssignmentPushRemediationAsync(assignment.Id);
-            Snackbar.Add(result.Message, result.CommandsFailed > 0 ? Severity.Warning : Severity.Success);
+            if (result.CommandsFailed > 0) Toast.Warning(result.Message);
+            else Toast.Success(result.Message);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            Toast.Error($"Error: {ex.Message}");
         }
     }
 }
