@@ -16,8 +16,11 @@ builder.Services.AddOpenTelemetry().UseAzureMonitor();
 
 // ============================================================
 // Authentication - Entra ID (Microsoft Entra) via OpenID Connect.
-// The whole portal is gated: every page requires an authenticated user
-// holding at least one PolicyManager.* app role (see FallbackPolicy below).
+// Every routable page is gated at the component level via the AuthorizeRouteView
+// in Routes.razor + an [Authorize(Policy = "CanRead")] attribute on each page,
+// requiring an authenticated user holding at least one PolicyManager.* app role.
+// Static assets, _framework/* and the _blazor circuit stay anonymous so CSS and
+// the Blazor connection load even before sign-in.
 // ============================================================
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
@@ -68,12 +71,6 @@ builder.Services.AddAuthorization(options =>
         .RequireAssertion(ctx =>
             HasRole(ctx.User, "PolicyManager.Administrator") ||
             HasRole(ctx.User, "PolicyManager.Operator")));
-
-    // Gate the entire portal: unauthenticated or role-less users are kicked out.
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .RequireAssertion(ctx => readRoles.Any(r => HasRole(ctx.User, r)))
-        .Build();
 });
 
 // Add services

@@ -1,4 +1,5 @@
 @page "/catalog"
+@attribute [Authorize(Policy = "CanRead")]
 @using ChromePolicyManager.Admin.Services
 @using ChromePolicyManager.Admin.Components.Pages.Dialogs
 @inject PolicyApiClient Api

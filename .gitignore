@@ -45,3 +45,5 @@ publish/
 ## Infra deployment artifacts
 infra/deployment-output-*.json
 infra/main.json
+
+artifacts/
