@@ -206,6 +206,22 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<List<EntraGroupDto>>(
             $"/api/groups/search?q={Uri.EscapeDataString(query)}", JsonOptions) ?? [];
     }
+
+    // === Client certificate trust configuration ===
+    public async Task<ClientCertConfigDto> GetClientCertConfigAsync()
+    {
+        return await _http.GetFromJsonAsync<ClientCertConfigDto>("/api/config/clientcert", JsonOptions) ?? new();
+    }
+
+    public async Task SaveClientCertConfigAsync(ClientCertConfigDto config)
+    {
+        var response = await _http.PutAsJsonAsync("/api/config/clientcert", config);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"Save failed ({(int)response.StatusCode}): {body}");
+        }
+    }
 }
 
 // === DTOs ===
@@ -358,4 +374,23 @@ public class AddToPolicySetResult
 {
     public PolicySetDto PolicySet { get; set; } = default!;
     public object Value { get; set; } = default!;
+}
+
+public class ClientCertConfigDto
+{
+    public bool Enabled { get; set; }
+    public bool CheckRevocation { get; set; }
+    public string RevocationMode { get; set; } = "Online";
+    public bool BackingStoreAvailable { get; set; }
+    public List<CaCertificateDto> Certificates { get; set; } = [];
+}
+
+public class CaCertificateDto
+{
+    public string Subject { get; set; } = "";
+    public string Issuer { get; set; } = "";
+    public string Thumbprint { get; set; } = "";
+    public string Base64 { get; set; } = "";
+    public bool IsRoot { get; set; }
+    public DateTime NotAfter { get; set; }
 }
