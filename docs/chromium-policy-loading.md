@@ -390,6 +390,12 @@ Vengono applicate **solo** se l'estensione è installata e pubblica uno schema
 - **Sorgente**: sempre `POLICY_SOURCE_PLATFORM` per le policy da registro
   (`policy_loader_win.cc:L93`).
 
+> **Vedi anche**: oltre al *Platform provider* descritto qui, Chrome possiede un
+> secondo provider **cloud nativo** (Chrome Browser Cloud Management) con sorgente
+> `POLICY_SOURCE_CLOUD`. Il funzionamento di quel canale, il protocollo Device
+> Management e la sua interazione/precedenza con il registro sono documentati in
+> [`chrome-browser-cloud-management.md`](./chrome-browser-cloud-management.md).
+
 `Load()` legge **prima** la macchina (HKLM) e **poi** l'utente (HKCU), fondendo
 nello stesso `PolicyMap` via `MergeFrom` (`policy_loader_win.cc:L321-L341`,
 `L374`). La risoluzione dei conflitti finale (es. mandatory-machine prevale su
