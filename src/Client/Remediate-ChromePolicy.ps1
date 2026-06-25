@@ -26,15 +26,25 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-# API Gateway (APIM) — device traffic goes through the gateway with mTLS client certificate auth
-$ApiGatewayUrl = "https://cpm-dev-apim2.azure-api.net"
-# Direct backend (fallback if APIM not yet deployed)
-$ApiDirectUrl = "https://cpm-dev-api.azurewebsites.net"
-# Use APIM gateway when available
-$ApiBaseUrl = if ($env:CPM_USE_DIRECT_API -eq "true") { $ApiDirectUrl } else { $ApiGatewayUrl }
+# API base URL is provisioned as a machine-scope environment variable (CPM_API_URL)
+# by the companion 'Set CPM API endpoint' Intune remediation. There is NO hardcoded
+# fallback: if the variable is missing the script aborts.
+$ApiUrlEnvVar = "CPM_API_URL"
+$ApiBaseUrl = $null
+foreach ($scope in @("Machine", "Process", "User")) {
+    $candidate = [Environment]::GetEnvironmentVariable($ApiUrlEnvVar, $scope)
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) { $ApiBaseUrl = $candidate; break }
+}
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
+    Write-Host "FATAL: environment variable '$ApiUrlEnvVar' is not set. Deploy the 'Set CPM API endpoint' remediation first."
+    exit 1
+}
+$ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
 
-# Client certificate configuration (issued by Intune PKCS/SCEP profile)
-$CertIssuerMatch = "CN=MSLABS-SUBCA01"  # Issuer CN of the Sub CA that signs device certs
+# Client certificate selector — issuer DN substring of the Sub CA that signs device certs.
+# Overridable via the CPM_CERT_ISSUER_LIKE machine env var (provisioned alongside CPM_API_URL).
+$CertIssuerMatch = [Environment]::GetEnvironmentVariable("CPM_CERT_ISSUER_LIKE", "Machine")
+if ([string]::IsNullOrWhiteSpace($CertIssuerMatch)) { $CertIssuerMatch = "CN=MSLABS-SUBCA01" }
 $CertSubjectPrefix = "CN="              # Device certs have CN=<deviceId>
 
 # Retry/jitter settings
