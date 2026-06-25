@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Microsoft.Graph;
 using Azure.Identity;
+using Azure.Data.AppConfiguration;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Services;
@@ -70,6 +71,19 @@ builder.Services.AddSingleton<ChromePolicyValidator>();
 builder.Services.AddSingleton<AdmxParserService>();
 builder.Services.AddHttpClient(); // For ADMX download from Google
 
+// Azure App Configuration client for ClientCert:* trust settings (Managed Identity).
+// Only registered when an endpoint is configured; otherwise the store runs in disabled mode.
+var appConfigEndpoint = builder.Configuration["AppConfig:Endpoint"];
+if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
+{
+    builder.Services.AddSingleton(new ConfigurationClient(new Uri(appConfigEndpoint), new DefaultAzureCredential()));
+}
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IClientCertConfigStore>(sp =>
+    new AppConfigClientCertConfigStore(
+        sp.GetRequiredService<ILogger<AppConfigClientCertConfigStore>>(),
+        sp.GetService<ConfigurationClient>()));
+
 // Service Bus - async device report processing
 builder.Services.AddSingleton<DeviceReportQueue>();
 builder.Services.AddHostedService<DeviceReportProcessor>();
@@ -136,6 +150,10 @@ app.UseCors("AllowManagementUI");
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Client-certificate validation: enforces the operator-configured trusted CA bundle on device
+// endpoints when APIM is not in front (e.g. dev/direct access).
+app.UseClientCertificateValidation();
+
 // APIM gateway enforcement: device endpoints require APIM managed identity
 app.UseApimGateway();
 
@@ -146,6 +164,7 @@ app.MapDeviceEndpoints();
 app.MapMonitoringEndpoints();
 app.MapCatalogEndpoints();
 app.MapWebhookEndpoints();
+app.MapConfigEndpoints();
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))
