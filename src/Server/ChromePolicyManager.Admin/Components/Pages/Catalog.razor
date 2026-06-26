@@ -205,12 +205,17 @@ else if (_stats is null && !_loading)
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input class="form-control" placeholder="e.g. SafeBrowsing, password..."
-                               value="@_searchText" @oninput="OnSearchChanged" />
+                               @bind="_searchText" @bind:event="oninput" @bind:after="ApplyFilters" />
+                        @if (!string.IsNullOrEmpty(_searchText))
+                        {
+                            <button class="btn btn-outline-secondary" type="button" title="Clear search"
+                                    @onclick="ClearSearch"><i class="bi bi-x-lg"></i></button>
+                        }
                     </div>
                 </div>
                 <div class="col-12 col-sm-3">
                     <label class="form-label">Category</label>
-                    <select class="form-select" value="@_selectedCategory" @onchange="OnCategoryChanged">
+                    <select class="form-select" @bind="_selectedCategory" @bind:after="ApplyFilters">
                         <option value="">All categories</option>
                         @foreach (var cat in _categories)
                         {
@@ -220,7 +225,7 @@ else if (_stats is null && !_loading)
                 </div>
                 <div class="col-12 col-sm-2">
                     <label class="form-label">Scope</label>
-                    <select class="form-select" value="@_selectedScope" @onchange="OnScopeChanged">
+                    <select class="form-select" @bind="_selectedScope" @bind:after="ApplyFilters">
                         <option value="">All</option>
                         <option value="mandatory">Mandatory</option>
                         <option value="recommended">Recommended</option>
@@ -386,24 +391,29 @@ else if (_stats is null && !_loading)
         await CheckLatestVersionAsync();
     }
 
-    private void OnSearchChanged(ChangeEventArgs e) { _searchText = e.Value?.ToString() ?? ""; ApplyFilters(); }
-    private void OnCategoryChanged(ChangeEventArgs e) { _selectedCategory = e.Value?.ToString(); ApplyFilters(); }
-    private void OnScopeChanged(ChangeEventArgs e) { _selectedScope = e.Value?.ToString(); ApplyFilters(); }
+    private void ClearSearch() { _searchText = ""; ApplyFilters(); }
 
     private void ApplyFilters()
     {
-        _filteredEntries = _entries;
-        if (!string.IsNullOrEmpty(_searchText))
-            _filteredEntries = _filteredEntries.Where(e =>
-                e.Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
-                e.DisplayName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
-                e.RegistryValueName.Contains(_searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+        IEnumerable<PolicyCatalogEntryDto> query = _entries;
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+            query = query.Where(e =>
+                (e.Name?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.DisplayName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.RegistryValueName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
         if (!string.IsNullOrEmpty(_selectedCategory))
-            _filteredEntries = _filteredEntries.Where(e => e.Category == _selectedCategory).ToList();
+            query = query.Where(e => e.Category == _selectedCategory);
         if (_selectedScope == "mandatory")
-            _filteredEntries = _filteredEntries.Where(e => !e.IsRecommended).ToList();
+            query = query.Where(e => !e.IsRecommended);
         else if (_selectedScope == "recommended")
-            _filteredEntries = _filteredEntries.Where(e => e.IsRecommended).ToList();
+            query = query.Where(e => e.IsRecommended);
+
+        _filteredEntries = query.ToList();
+        StateHasChanged();
     }
 
     private async Task ShowDetails(PolicyCatalogEntryDto entry)
