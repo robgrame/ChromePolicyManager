@@ -22,4 +22,8 @@
     <PackageReference Include="Microsoft.Identity.Web" Version="3.*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\ChromePolicyManager.Contracts\ChromePolicyManager.Contracts.csproj" />
+  </ItemGroup>
+
 </Project>

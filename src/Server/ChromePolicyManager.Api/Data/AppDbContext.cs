@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<PolicyCatalogEntry> PolicyCatalog => Set<PolicyCatalogEntry>();
     public DbSet<DeviceLog> DeviceLogs => Set<DeviceLog>();
+    public DbSet<PrivilegedCommand> PrivilegedCommands => Set<PrivilegedCommand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,6 +73,13 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.DeviceId);
             e.HasIndex(x => x.ReceivedAt);
             e.HasIndex(x => new { x.DeviceId, x.ClientTimestamp });
+        });
+
+        modelBuilder.Entity<PrivilegedCommand>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.CreatedUtc);
         });
     }
 }

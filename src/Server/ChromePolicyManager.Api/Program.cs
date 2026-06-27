@@ -9,6 +9,7 @@ using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Services;
 using ChromePolicyManager.Api.Endpoints;
 using ChromePolicyManager.Api.Middleware;
+using ChromePolicyManager.Api.Hubs;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -88,6 +89,12 @@ builder.Services.AddSingleton<IClientCertConfigStore>(sp =>
 builder.Services.AddSingleton<DeviceReportQueue>();
 builder.Services.AddHostedService<DeviceReportProcessor>();
 
+// Decoupled privileged-action pipeline (ADR-001): command publisher + status relay + SignalR.
+builder.Services.AddSingleton<CommandQueueClient>();
+builder.Services.AddScoped<ICommandPublisher, CommandPublisher>();
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<CommandStatusRelay>();
+
 // Graph change notifications - webhook subscription management
 builder.Services.AddHostedService<GroupChangeNotificationService>();
 
@@ -108,7 +115,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowManagementUI", policy =>
         policy.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? Array.Empty<string>())
             .AllowAnyMethod()
-            .AllowAnyHeader());
+            .AllowAnyHeader()
+            .AllowCredentials()); // required for SignalR (CommandStatusHub)
 });
 
 // Increase request size limit for ADMX zip upload
@@ -135,6 +143,22 @@ var app = builder.Build();
                 ALTER TABLE DeviceStates ADD ScriptVersion NVARCHAR(50) NULL;
             IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('DeviceReports') AND name = 'ScriptVersion')
                 ALTER TABLE DeviceReports ADD ScriptVersion NVARCHAR(50) NULL;
+
+            IF OBJECT_ID('PrivilegedCommands', 'U') IS NULL
+            CREATE TABLE PrivilegedCommands (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                Type INT NOT NULL,
+                Status INT NOT NULL,
+                PayloadJson NVARCHAR(2000) NULL,
+                Actor NVARCHAR(256) NULL,
+                Reason NVARCHAR(512) NULL,
+                Message NVARCHAR(1024) NULL,
+                ResultJson NVARCHAR(MAX) NULL,
+                Error NVARCHAR(2000) NULL,
+                Attempts INT NOT NULL DEFAULT 0,
+                CreatedUtc DATETIME2 NOT NULL,
+                UpdatedUtc DATETIME2 NULL
+            );
         ");
     }
     catch { /* Column may already exist or DB not ready */ }
@@ -165,6 +189,8 @@ app.MapMonitoringEndpoints();
 app.MapCatalogEndpoints();
 app.MapWebhookEndpoints();
 app.MapConfigEndpoints();
+app.MapCommandEndpoints();
+app.MapHub<CommandStatusHub>(CommandStatusHub.Path);
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))

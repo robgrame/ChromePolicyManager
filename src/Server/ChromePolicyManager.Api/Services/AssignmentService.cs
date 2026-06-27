@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ChromePolicyManager.Api.Data;
 using ChromePolicyManager.Api.Models;
+using ChromePolicyManager.Contracts;
 
 namespace ChromePolicyManager.Api.Services;
 
@@ -9,12 +10,47 @@ public class AssignmentService
     private readonly AppDbContext _db;
     private readonly AuditService _audit;
     private readonly PushRemediationService _pushRemediation;
+    private readonly ICommandPublisher _commandPublisher;
+    private readonly bool _queuedMode;
 
-    public AssignmentService(AppDbContext db, AuditService audit, PushRemediationService pushRemediation)
+    public AssignmentService(
+        AppDbContext db,
+        AuditService audit,
+        PushRemediationService pushRemediation,
+        ICommandPublisher commandPublisher,
+        IConfiguration configuration)
     {
         _db = db;
         _audit = audit;
         _pushRemediation = pushRemediation;
+        _commandPublisher = commandPublisher;
+        _queuedMode = string.Equals(
+            configuration["PrivilegedActions:Mode"], "Queued", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Dispatch push remediation for an assignment. In Inline mode (default) the API performs the
+    /// Graph calls directly (legacy behavior). In Queued mode it enqueues a command for the Worker
+    /// (ADR-001) and returns a "queued" result so the caller's flow is unchanged.
+    /// </summary>
+    private async Task<PushRemediationDispatchResult> DispatchAsync(
+        PolicyAssignment assignment, string reason, string? actor)
+    {
+        if (_queuedMode && _commandPublisher.Enabled)
+        {
+            var payload = new PushRemediationDispatchPayload
+            {
+                AssignmentId = assignment.Id,
+                EntraGroupId = assignment.EntraGroupId,
+                GroupName = assignment.GroupName
+            };
+            var commandId = await _commandPublisher.PublishAsync(
+                PrivilegedCommandType.PushRemediationDispatch, payload, actor, reason);
+            return new PushRemediationDispatchResult(
+                false, $"Push remediation queued (command {commandId}).", 0, 0, 0, 0);
+        }
+
+        return await _pushRemediation.DispatchToAssignmentAsync(assignment, reason, actor);
     }
 
     public async Task<PolicyAssignment> CreateAssignmentAsync(
@@ -54,7 +90,7 @@ public class AssignmentService
 
         if (pushRemediationEnabled)
         {
-            await _pushRemediation.DispatchToAssignmentAsync(assignment, "Assignment created", actor);
+            await DispatchAsync(assignment, "Assignment created", actor);
         }
         return assignment;
     }
@@ -143,7 +179,7 @@ public class AssignmentService
 
         if (enabled && triggerNow)
         {
-            await _pushRemediation.DispatchToAssignmentAsync(assignment, "Push remediation enabled from assignment management", actor);
+            await DispatchAsync(assignment, "Push remediation enabled from assignment management", actor);
         }
 
         return assignment;
@@ -153,7 +189,7 @@ public class AssignmentService
     {
         var assignment = await _db.PolicyAssignments.FindAsync(assignmentId);
         if (assignment == null) return null;
-        return await _pushRemediation.DispatchToAssignmentAsync(assignment, "Manual trigger from assignment management", actor);
+        return await DispatchAsync(assignment, "Manual trigger from assignment management", actor);
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>
