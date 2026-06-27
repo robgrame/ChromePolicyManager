@@ -393,6 +393,29 @@ resource deviceReportQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-pr
   }
 }
 
+// Decoupled privileged-action pipeline (ADR-001): commands (API -> Worker) + status (Worker -> API).
+resource commandsQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = if (deployServiceBus) {
+  parent: serviceBusNamespace
+  name: 'cpm-commands'
+  properties: {
+    maxDeliveryCount: 5
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P14D'
+    deadLetteringOnMessageExpiration: true
+  }
+}
+
+resource commandStatusQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = if (deployServiceBus) {
+  parent: serviceBusNamespace
+  name: 'cpm-command-status'
+  properties: {
+    maxDeliveryCount: 5
+    lockDuration: 'PT1M'
+    defaultMessageTimeToLive: 'P1D'
+    deadLetteringOnMessageExpiration: true
+  }
+}
+
 // Service Bus Private Endpoint
 resource serviceBusPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = if (deployServiceBus) {
   name: '${prefix}-sb-pe'

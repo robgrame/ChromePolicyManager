@@ -53,6 +53,15 @@ param integrationSubnetId string
 ])
 param skuTier string = environmentName == 'prod' ? 'prod' : 'dev'
 
+@description('Deploy the privileged-action Worker Function App (ADR-001). Requires the Service Bus namespace to exist.')
+param deployWorker bool = false
+
+@description('Existing Service Bus namespace name used by the Worker (defaults to <prefix>-sb).')
+param serviceBusNamespaceName string = ''
+
+@description('Intune deviceHealthScript policy id used by the Worker for proactive remediation.')
+param pushRemediationScriptPolicyId string = ''
+
 var prefix = 'cpm-${environmentName}'
 // Short suffix for globally-unique resource names (Key Vault, App Configuration)
 var uniqueSuffix = take(uniqueString(resourceGroup().id), 6)
@@ -229,6 +238,24 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 }
 
 // ============================================================
+// Privileged-action Worker (ADR-001) - opt-in
+// ============================================================
+module worker 'modules/worker.bicep' = if (deployWorker) {
+  name: 'worker'
+  params: {
+    prefix: prefix
+    location: location
+    tags: tags
+    appServicePlanId: appServicePlan.id
+    integrationSubnetId: integrationSubnetId
+    appInsightsConnectionString: applicationInsights.properties.ConnectionString
+    serviceBusNamespaceName: empty(serviceBusNamespaceName) ? '${prefix}-sb' : serviceBusNamespaceName
+    pushRemediationScriptPolicyId: pushRemediationScriptPolicyId
+    uniqueSuffix: uniqueSuffix
+  }
+}
+
+// ============================================================
 // Outputs
 // ============================================================
 output apiUrl string = 'https://${apiAppService.properties.defaultHostName}'
@@ -242,3 +269,5 @@ output apiIdentityPrincipalId string = uami.properties.principalId
 output apiAppName string = apiAppService.name
 output adminAppName string = adminAppService.name
 output resourceGroupName string = resourceGroup().name
+output workerAppName string = deployWorker ? worker.outputs.workerAppName : ''
+output workerIdentityPrincipalId string = deployWorker ? worker.outputs.workerIdentityPrincipalId : ''
