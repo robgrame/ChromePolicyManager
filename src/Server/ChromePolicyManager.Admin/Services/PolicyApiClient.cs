@@ -78,8 +78,25 @@ public class PolicyApiClient
         {
             policySetVersionId, entraGroupId, groupName, priority, scope, pushRemediationEnabled
         });
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(await ExtractErrorMessageAsync(response));
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
+    }
+
+    private static async Task<string> ExtractErrorMessageAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            var doc = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            if (doc.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                doc.TryGetProperty("message", out var msg) &&
+                msg.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return msg.GetString()!;
+            }
+        }
+        catch { /* body wasn't JSON with a message field */ }
+        return $"Request failed ({(int)response.StatusCode} {response.ReasonPhrase}).";
     }
 
     public async Task<AssignmentDto> UpdateAssignmentAsync(Guid assignmentId, string? entraGroupId, 

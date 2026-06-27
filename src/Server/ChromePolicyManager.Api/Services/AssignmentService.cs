@@ -22,6 +22,13 @@ public class AssignmentService
         int priority, PolicyScope scope = PolicyScope.Mandatory,
         bool pushRemediationEnabled = false, string? actor = null)
     {
+        // Guard the unique (PolicySetVersionId, EntraGroupId) index with a friendly error
+        // instead of letting the SQL duplicate-key violation surface as a raw 500.
+        var alreadyAssigned = await _db.PolicyAssignments
+            .AnyAsync(a => a.PolicySetVersionId == policySetVersionId && a.EntraGroupId == entraGroupId);
+        if (alreadyAssigned)
+            throw new DuplicateAssignmentException(groupName);
+
         var assignment = new PolicyAssignment
         {
             PolicySetVersionId = policySetVersionId,
@@ -33,7 +40,15 @@ public class AssignmentService
             CreatedBy = actor
         };
         _db.PolicyAssignments.Add(assignment);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // Race condition: another request inserted the same pair between the check and the save.
+            throw new DuplicateAssignmentException(groupName);
+        }
         await _audit.LogAsync("Assignment.Created", actor, "PolicyAssignment", assignment.Id.ToString(),
             $"Group: {groupName}, Priority: {priority}, Scope: {scope}, PushRemediationEnabled: {pushRemediationEnabled}");
 
@@ -140,4 +155,18 @@ public class AssignmentService
         if (assignment == null) return null;
         return await _pushRemediation.DispatchToAssignmentAsync(assignment, "Manual trigger from assignment management", actor);
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Microsoft.Data.SqlClient.SqlException sql &&
+        (sql.Number == 2601 || sql.Number == 2627);
+}
+
+/// <summary>
+/// Thrown when an Entra group is already assigned to the same policy set version.
+/// Mapped to HTTP 409 Conflict by the assignments endpoint.
+/// </summary>
+public sealed class DuplicateAssignmentException : Exception
+{
+    public DuplicateAssignmentException(string groupName)
+        : base($"Group '{groupName}' is already assigned to this policy version.") { }
 }

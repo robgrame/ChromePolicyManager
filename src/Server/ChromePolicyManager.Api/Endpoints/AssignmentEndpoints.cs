@@ -18,14 +18,21 @@ public static class AssignmentEndpoints
 
         group.MapPost("/", async ([FromBody] CreateAssignmentRequest request, AssignmentService service) =>
         {
-            var assignment = await service.CreateAssignmentAsync(
-                request.PolicySetVersionId,
-                request.EntraGroupId,
-                request.GroupName,
-                request.Priority,
-                request.Scope,
-                request.PushRemediationEnabled);
-            return Results.Created($"/api/assignments/{assignment.Id}", assignment);
+            try
+            {
+                var assignment = await service.CreateAssignmentAsync(
+                    request.PolicySetVersionId,
+                    request.EntraGroupId,
+                    request.GroupName,
+                    request.Priority,
+                    request.Scope,
+                    request.PushRemediationEnabled);
+                return Results.Created($"/api/assignments/{assignment.Id}", assignment);
+            }
+            catch (DuplicateAssignmentException ex)
+            {
+                return Results.Conflict(new { message = ex.Message });
+            }
         }).WithName("CreateAssignment");
 
         group.MapPut("/{id:guid}", async (Guid id, [FromBody] UpdateAssignmentRequest request, AssignmentService service) =>
