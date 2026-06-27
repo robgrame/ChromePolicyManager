@@ -62,6 +62,9 @@ param serviceBusNamespaceName string = ''
 @description('Intune deviceHealthScript policy id used by the Worker for proactive remediation.')
 param pushRemediationScriptPolicyId string = ''
 
+@description('Event Grid topic endpoint for the policy-status pipeline (from the infra tier output).')
+param eventGridTopicEndpoint string = ''
+
 var prefix = 'cpm-${environmentName}'
 // Short suffix for globally-unique resource names (Key Vault, App Configuration)
 var uniqueSuffix = take(uniqueString(resourceGroup().id), 6)
@@ -166,6 +169,7 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'ASPNETCORE_ENVIRONMENT', value: environmentName == 'prod' ? 'Production' : 'Development' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
+        { name: 'EventGrid__TopicEndpoint', value: eventGridTopicEndpoint }
       ]
       connectionStrings: [
         {

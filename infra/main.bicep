@@ -256,6 +256,7 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ASPNETCORE_ENVIRONMENT', value: environmentName == 'prod' ? 'Production' : 'Development' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
         { name: 'ServiceBus__FullyQualifiedNamespace', value: deployServiceBus ? '${serviceBusNamespace.name}.servicebus.windows.net' : '' }
+        { name: 'EventGrid__TopicEndpoint', value: eventGridTopic.properties.endpoint }
       ]
       connectionStrings: [
         {
@@ -462,6 +463,64 @@ resource serviceBusRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-
 }
 
 // ============================================================
+// Event Grid - policy-application status pipeline (feeds the portal)
+// Publishers (API now; Worker later) push DevicePolicyStatusChanged events here.
+// The API webhook subscriber rebroadcasts them to the portal over SignalR.
+// MI-only (disableLocalAuth) — policy compliant, no SAS keys.
+// ============================================================
+
+@description('Deploy the Event Grid event subscription (webhook to the API). Enable AFTER the API code with /api/eventgrid is deployed and reachable, so the validation handshake succeeds.')
+param deployEventGridSubscription bool = false
+
+resource eventGridTopic 'Microsoft.EventGrid/topics@2023-12-15-preview' = {
+  name: '${prefix}-events'
+  location: location
+  tags: tags
+  properties: {
+    inputSchema: 'EventGridSchema'
+    publicNetworkAccess: 'Enabled'
+    disableLocalAuth: true // No access keys — Managed Identity only
+  }
+}
+
+// RBAC: API Managed Identity → EventGrid Data Sender (publish events)
+resource eventGridSenderRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(eventGridTopic.id, uami.id, 'd5a91429-5739-47e2-a06b-3470a27159e7')
+  scope: eventGridTopic
+  properties: {
+    principalId: uami.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'd5a91429-5739-47e2-a06b-3470a27159e7') // EventGrid Data Sender
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Webhook subscription → API /api/eventgrid/policy-status (opt-in; API must be live for validation)
+resource policyStatusSubscription 'Microsoft.EventGrid/topics/eventSubscriptions@2023-12-15-preview' = if (deployEventGridSubscription) {
+  parent: eventGridTopic
+  name: 'portal-policy-status'
+  properties: {
+    destination: {
+      endpointType: 'WebHook'
+      properties: {
+        endpointUrl: 'https://${apiAppService.properties.defaultHostName}/api/eventgrid/policy-status'
+        maxEventsPerBatch: 10
+        preferredBatchSizeInKilobytes: 64
+      }
+    }
+    filter: {
+      includedEventTypes: [
+        'ChromePolicyManager.DevicePolicyStatusChanged'
+      ]
+    }
+    eventDeliverySchema: 'EventGridSchema'
+    retryPolicy: {
+      maxDeliveryAttempts: 30
+      eventTimeToLiveInMinutes: 1440
+    }
+  }
+}
+
+// ============================================================
 // App Configuration
 // ============================================================
 
@@ -576,6 +635,7 @@ output apiUrl string = 'https://${apiAppService.properties.defaultHostName}'
 output adminUrl string = 'https://${adminAppService.properties.defaultHostName}'
 output apimGatewayUrl string = deployApim ? apim.properties.gatewayUrl : ''
 output appConfigEndpoint string = appConfig.properties.endpoint
+output eventGridTopicEndpoint string = eventGridTopic.properties.endpoint
 output keyVaultUri string = keyVault.properties.vaultUri
 output serviceBusNamespace string = deployServiceBus ? serviceBusNamespace.name : ''
 output appInsightsConnectionString string = applicationInsights.properties.ConnectionString

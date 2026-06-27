@@ -145,6 +145,10 @@ if ($SkipInfra) {
 }
 else {
     Write-Step '6/10 Deploying app-tier Bicep'
+    # Pull the Event Grid topic endpoint from the infra-tier topic (if present) so the API app
+    # gets EventGrid__TopicEndpoint without losing it when the app-tier redeploys the app settings.
+    $eventGridEndpoint = az eventgrid topic show -g $ResourceGroupName -n "$prefix-events" --query endpoint -o tsv 2>$null
+    if (-not $eventGridEndpoint) { $eventGridEndpoint = '' }
     $deployOut = az deployment group create `
         --resource-group $ResourceGroupName `
         --name "cpm-apptier-$EnvironmentName" `
@@ -152,7 +156,7 @@ else {
         --parameters (Join-Path $infraDir "main.apptier.$EnvironmentName.bicepparam") `
         --parameters clientSecret=$clientSecret tenantId=$TenantId clientId=$clientId `
                      location=$Location sqlServerFqdn=$sqlFqdn sqlDatabaseName=$SqlDatabaseName `
-                     integrationSubnetId=$subnetId `
+                     integrationSubnetId=$subnetId eventGridTopicEndpoint=$eventGridEndpoint `
         --query properties.outputs -o json | ConvertFrom-Json
     $uamiPrincipalId = $deployOut.apiIdentityPrincipalId.value
     $apiAppName = $deployOut.apiAppName.value
