@@ -11,6 +11,17 @@ using Microsoft.Identity.Web.UI;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Azure App Configuration is the single source of truth for portal settings.
+// Load it as a configuration provider FIRST so every subsequent Configuration read
+// (ApiBaseUrl, AzureAd, Api:Scopes, ...) resolves from App Config, with appsettings.json
+// only providing local defaults. Uses Managed Identity in Azure.
+var appConfigEndpoint = builder.Configuration["AppConfig:Endpoint"];
+if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
+{
+    builder.Configuration.AddAzureAppConfiguration(options =>
+        options.Connect(new Uri(appConfigEndpoint), new Azure.Identity.DefaultAzureCredential()));
+}
+
 // Application Insights via OpenTelemetry
 builder.Services.AddOpenTelemetry().UseAzureMonitor();
 
@@ -23,7 +34,9 @@ builder.Services.AddOpenTelemetry().UseAzureMonitor();
 // the Blazor connection load even before sign-in.
 // ============================================================
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
+    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"))
+    .EnableTokenAcquisitionToCallDownstreamApi(builder.Configuration.GetSection("Api:Scopes").Get<string[]>() ?? [])
+    .AddInMemoryTokenCaches();
 
 // When an unauthenticated user hits a protected endpoint, or an authenticated
 // user lacks the required role, route them to the friendly /access-denied page

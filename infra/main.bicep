@@ -257,6 +257,7 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
         { name: 'ServiceBus__FullyQualifiedNamespace', value: deployServiceBus ? '${serviceBusNamespace.name}.servicebus.windows.net' : '' }
         { name: 'EventGrid__TopicEndpoint', value: eventGridTopic.properties.endpoint }
+        { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
       ]
       connectionStrings: [
         {
@@ -287,6 +288,7 @@ resource adminAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ASPNETCORE_ENVIRONMENT', value: environmentName == 'prod' ? 'Production' : 'Development' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
         { name: 'ApiBaseUrl', value: 'https://${prefix}-api.azurewebsites.net' }
+        { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
       ]
     }
   }
@@ -530,6 +532,28 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' =
   tags: tags
   sku: {
     name: sku.appConfig.name
+  }
+}
+
+// App Configuration Data Reader (516239f1-63e1-4d78-a4de-a74fb236a071) so the API (UAMI)
+// and the Admin portal (system-assigned identity) can read settings via Managed Identity.
+resource appConfigReaderApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, uami.id, 'AppConfigDataReader')
+  scope: appConfig
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
+  }
+}
+
+resource appConfigReaderAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, adminAppService.id, 'AppConfigDataReader')
+  scope: appConfig
+  properties: {
+    principalId: adminAppService.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
   }
 }
 

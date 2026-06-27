@@ -14,6 +14,17 @@ using ChromePolicyManager.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Azure App Configuration is the single source of truth for app/portal settings.
+// Load it as a configuration provider FIRST so every subsequent Configuration read
+// (connection string, AzureAd, Hubs:RequireAuth, EventGrid, ...) resolves from App Config,
+// with appsettings.json only providing local defaults. Uses Managed Identity in Azure.
+var appConfigEndpoint = builder.Configuration["AppConfig:Endpoint"];
+if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
+{
+    builder.Configuration.AddAzureAppConfiguration(options =>
+        options.Connect(new Uri(appConfigEndpoint), new DefaultAzureCredential()));
+}
+
 // Application Insights via OpenTelemetry
 builder.Services.AddOpenTelemetry().UseAzureMonitor();
 
@@ -51,6 +62,28 @@ builder.Services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.Jwt
             clientId,
             $"api://{clientId}"
         };
+
+        // SignalR clients cannot set the Authorization header on the WebSocket handshake,
+        // so they pass the bearer token via the access_token query string. Pull it from
+        // there for hub paths so [Authorize] hubs can validate the token.
+        var originalOnMessageReceived = options.Events?.OnMessageReceived;
+        options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+        options.Events.OnMessageReceived = async context =>
+        {
+            if (originalOnMessageReceived is not null)
+            {
+                await originalOnMessageReceived(context);
+            }
+
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) &&
+                (path.StartsWithSegments(PolicyStatusHub.Path) ||
+                 path.StartsWithSegments(CommandStatusHub.Path)))
+            {
+                context.Token = accessToken;
+            }
+        };
     });
 
 // Microsoft Graph client (uses Managed Identity in Azure, falls back to CLI locally)
@@ -73,8 +106,7 @@ builder.Services.AddSingleton<AdmxParserService>();
 builder.Services.AddHttpClient(); // For ADMX download from Google
 
 // Azure App Configuration client for ClientCert:* trust settings (Managed Identity).
-// Only registered when an endpoint is configured; otherwise the store runs in disabled mode.
-var appConfigEndpoint = builder.Configuration["AppConfig:Endpoint"];
+// Reuses the endpoint resolved above; only registered when configured.
 if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 {
     builder.Services.AddSingleton(new ConfigurationClient(new Uri(appConfigEndpoint), new DefaultAzureCredential()));
@@ -194,8 +226,19 @@ app.MapWebhookEndpoints();
 app.MapConfigEndpoints();
 app.MapCommandEndpoints();
 app.MapEventGridEndpoints();
-app.MapHub<CommandStatusHub>(CommandStatusHub.Path);
-app.MapHub<PolicyStatusHub>(PolicyStatusHub.Path);
+
+// Hub authorization is opt-in via config so the live portal feed keeps working in
+// environments where the Entra delegated scope/consent isn't configured yet.
+// Set Hubs:RequireAuth=true once the portal app registration has consent for the
+// API's exposed scope (api://{apiClientId}/access_as_user).
+var hubsRequireAuth = app.Configuration.GetValue<bool>("Hubs:RequireAuth");
+var commandStatusHub = app.MapHub<CommandStatusHub>(CommandStatusHub.Path);
+var policyStatusHub = app.MapHub<PolicyStatusHub>(PolicyStatusHub.Path);
+if (hubsRequireAuth)
+{
+    commandStatusHub.RequireAuthorization();
+    policyStatusHub.RequireAuthorization();
+}
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))

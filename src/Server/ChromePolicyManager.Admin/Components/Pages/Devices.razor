@@ -3,6 +3,7 @@
 @inject PolicyApiClient Api
 @inject ToastService Toast
 @inject IConfiguration Config
+@inject Microsoft.Identity.Web.ITokenAcquisition TokenAcquisition
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.SignalR.Client
 
@@ -203,10 +204,24 @@ else
     {
         var apiBaseUrl = Config["ApiBaseUrl"] ?? "https://cpm-dev-api.azurewebsites.net";
         var hubUrl = $"{apiBaseUrl.TrimEnd('/')}{PolicyStatusHubPath}";
+        var apiScopes = Config.GetSection("Api:Scopes").Get<string[]>() ?? [];
         try
         {
             _hub = new HubConnectionBuilder()
-                .WithUrl(hubUrl)
+                .WithUrl(hubUrl, options =>
+                {
+                    // Acquire a delegated access token for the API so the hub can enforce
+                    // [Authorize] (Hubs:RequireAuth=true on the API). No-op when no scope is
+                    // configured: the connection stays anonymous and still works.
+                    if (apiScopes.Length > 0)
+                    {
+                        options.AccessTokenProvider = async () =>
+                        {
+                            try { return await TokenAcquisition.GetAccessTokenForUserAsync(apiScopes); }
+                            catch { return null; }
+                        };
+                    }
+                })
                 .WithAutomaticReconnect()
                 .Build();
 

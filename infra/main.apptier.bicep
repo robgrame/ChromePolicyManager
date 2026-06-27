@@ -170,6 +170,7 @@ resource apiAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ASPNETCORE_ENVIRONMENT', value: environmentName == 'prod' ? 'Production' : 'Development' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
         { name: 'EventGrid__TopicEndpoint', value: eventGridTopicEndpoint }
+        { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
       ]
       connectionStrings: [
         {
@@ -207,20 +208,38 @@ resource adminAppService 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureAd__ClientSecret', value: adminClientSecret }
         { name: 'AzureAd__CallbackPath', value: '/signin-oidc' }
         { name: 'AzureAd__SignedOutCallbackPath', value: '/signout-callback-oidc' }
+        { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
       ]
     }
   }
 }
 
 // ============================================================
-// App Configuration
+// App Configuration (canonical store created by the infra-tier template).
+// Referenced as existing so the app-tier never creates a duplicate store.
 // ============================================================
-resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' = {
-  name: '${prefix}-config-${uniqueSuffix}'
-  location: location
-  tags: tags
-  sku: {
-    name: sku.appConfig.name
+resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
+  name: '${prefix}-config'
+}
+
+// App Configuration Data Reader for the API (UAMI) and Admin portal (system-assigned).
+resource appConfigReaderApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, uami.id, 'AppConfigDataReader')
+  scope: appConfig
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
+  }
+}
+
+resource appConfigReaderAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, adminAppService.id, 'AppConfigDataReader')
+  scope: appConfig
+  properties: {
+    principalId: adminAppService.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
   }
 }
 
