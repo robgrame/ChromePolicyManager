@@ -406,4 +406,55 @@ dispatch vengono accodati al Worker.
 
 ---
 
+## 16. Pipeline stato applicazione policy via Event Grid
+
+Per alimentare il portale con lo **stato di applicazione delle policy** lato device si usa
+**Azure Event Grid** come backbone di eventi (custom topic), separato dalla coda comandi SB.
+
+### Razionale
+- Event Grid **non consegna ai browser**: il portale è Blazor Server, quindi l'ultimo hop verso
+  il client resta **SignalR**. Event Grid è il layer di distribuzione *a monte* che disaccoppia i
+  produttori (API oggi, Worker dopo la migrazione device-reports) dal consumatore (l'API che fa
+  broadcast SignalR), e abilita fan-out verso futuri subscriber (analytics, alerting, Teams).
+- Compatibile con le policy: topic con `disableLocalAuth=true` (no SAS), pubblicazione con
+  **Managed Identity** (ruolo *EventGrid Data Sender*).
+
+### Flusso
+```
+Device ─▶ APIM ─▶ SB(device-reports) ─▶ DeviceReportProcessor (API)
+   └─ (fallback sync: POST /api/devices/{id}/report)
+                                   │ persiste DeviceState (SQL)
+                                   └─ EventGrid.Publish(DevicePolicyStatusChanged)  [MI]
+EventGrid topic ─▶ (subscription webhook) ─▶ POST /api/eventgrid/policy-status (API)
+                                   ├─ handshake SubscriptionValidation
+                                   └─ broadcast SignalR (PolicyStatusHub) ─▶ Portale (real-time)
+```
+
+### Componenti
+| Lato | Componente | Ruolo |
+|---|---|---|
+| Contracts | `DevicePolicyStatusChangedData`, `PolicyEventTypes` | contratto evento versionato |
+| API (producer) | `IEventPublisher` / `EventGridEventPublisher` | publish MI; no-op se `EventGrid:TopicEndpoint` assente |
+| API (producer) | `DeviceReportProcessor` + fallback endpoint | emette l'evento dopo aver persistito il report |
+| API (subscriber) | `EventGridEndpoints` (`/api/eventgrid/policy-status`) | handshake + ribroadcast |
+| API (subscriber) | `PolicyStatusHub` (SignalR) | push verso il portale |
+| Infra | topic `cpm-<env>-events` + RBAC + subscription opt-in | backbone eventi |
+
+### Note operative
+- La **event subscription** (webhook) è **opt-in** (`deployEventGridSubscription=true`): va
+  abilitata *dopo* che l'API con `/api/eventgrid/policy-status` è deployata e raggiungibile, perché
+  Event Grid esegue l'handshake di validazione alla creazione.
+- Sicurezza: in scaffold l'endpoint è anonimo (la validazione autentica la subscription). In
+  produzione usare delivery **AAD-secured** (Entra) verso il webhook.
+- L'evento è **best-effort**: un errore di publish non fa fallire l'elaborazione del report.
+- Quando i device-reports verranno migrati sul Worker (fase 3), sarà il Worker a pubblicare gli
+  eventi sullo stesso topic: l'API resta l'unico subscriber/broadcaster SignalR, senza modifiche
+  al contratto.
+
+> Differenza con la coda `cpm-command-status`: quest'ultima serve il ciclo di vita dei **comandi
+> privilegiati** (semantica work-queue/affidabilità), mentre Event Grid serve le **notifiche di
+> stato** ad alto fan-out verso il portale. Sono due domini distinti e coesistono.
+
+---
+
 *Fine ADR-001.*
