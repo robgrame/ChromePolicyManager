@@ -179,6 +179,9 @@ var app = builder.Build();
             IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('DeviceReports') AND name = 'ScriptVersion')
                 ALTER TABLE DeviceReports ADD ScriptVersion NVARCHAR(50) NULL;
 
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PolicySetVersions') AND name = 'AdmxVersion')
+                ALTER TABLE PolicySetVersions ADD AdmxVersion NVARCHAR(50) NULL;
+
             IF OBJECT_ID('PrivilegedCommands', 'U') IS NULL
             CREATE TABLE PrivilegedCommands (
                 Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,

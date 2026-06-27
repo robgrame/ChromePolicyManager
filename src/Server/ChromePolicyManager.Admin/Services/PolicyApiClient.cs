@@ -257,6 +257,7 @@ public class PolicySetVersionDto
     public Guid Id { get; set; }
     public Guid PolicySetId { get; set; }
     public string Version { get; set; } = "";
+    public string? AdmxVersion { get; set; }
     public string SettingsJson { get; set; } = "{}";
     public string Hash { get; set; } = "";
     public PolicyVersionStatus Status { get; set; }

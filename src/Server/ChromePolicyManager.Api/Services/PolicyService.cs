@@ -53,14 +53,27 @@ public class PolicyService
             Version = version,
             SettingsJson = settingsJson,
             Hash = hash,
+            AdmxVersion = await GetCatalogTemplateVersionAsync(),
             Status = PolicyVersionStatus.Draft,
             CreatedBy = actor
         };
         _db.PolicySetVersions.Add(policyVersion);
         await _db.SaveChangesAsync();
         await _audit.LogAsync("PolicyVersion.Created", actor, "PolicySetVersion", policyVersion.Id.ToString(),
-            $"Version: {version}, Hash: {hash}");
+            $"Version: {version}, AdmxVersion: {policyVersion.AdmxVersion ?? "none"}, Hash: {hash}");
         return policyVersion;
+    }
+
+    /// <summary>
+    /// Returns the Chrome ADMX template version currently loaded in the catalog, used to stamp
+    /// new policy versions so we can trace which Chrome version they were authored against.
+    /// </summary>
+    private async Task<string?> GetCatalogTemplateVersionAsync()
+    {
+        var version = await _db.PolicyCatalog
+            .Select(e => e.TemplateVersion)
+            .FirstOrDefaultAsync();
+        return string.IsNullOrWhiteSpace(version) ? null : version;
     }
 
     public async Task<PolicySetVersion?> PromoteVersionAsync(Guid versionId, string? actor = null)
@@ -147,6 +160,7 @@ public class PolicyService
                 Version = nextVersion,
                 SettingsJson = "{}",
                 Hash = "",
+                AdmxVersion = await GetCatalogTemplateVersionAsync(),
                 Status = PolicyVersionStatus.Draft
             };
             _db.PolicySetVersions.Add(draft);

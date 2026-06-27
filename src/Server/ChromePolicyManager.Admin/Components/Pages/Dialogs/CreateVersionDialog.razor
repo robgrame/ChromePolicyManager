@@ -8,6 +8,14 @@
     <div class="mb-3">
         <label class="form-label">Version <span class="text-danger">*</span></label>
         <input class="form-control" @bind="_version" @bind:event="oninput" placeholder="e.g. 1.0.0" />
+        @if (!string.IsNullOrEmpty(_catalogVersion))
+        {
+            <div class="form-text">
+                <i class="bi bi-google me-1"></i>
+                This version will be tagged with the current Chrome ADMX template:
+                <strong>@_catalogVersion</strong>
+            </div>
+        }
     </div>
 
     <div class="d-flex align-items-center mb-2">
@@ -166,6 +174,7 @@
     private string _catalogSearch = "";
     private bool _loadingCatalog;
     private bool _catalogLoaded;
+    private string _catalogVersion = "";
 
     private bool _addingPolicy;
     private PolicyCatalogEntryDto? _selectedEntry;
@@ -197,6 +206,7 @@
                 catch { }
                 finally { _loadingCatalog = false; }
             }
+            _catalogVersion = _catalogEntries.FirstOrDefault()?.TemplateVersion ?? "";
         }
     }
 

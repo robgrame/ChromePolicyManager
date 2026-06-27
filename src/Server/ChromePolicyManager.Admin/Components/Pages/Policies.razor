@@ -44,12 +44,24 @@ else
                         @if (policy.Versions.Any())
                         {
                             <table class="table table-sm table-hover align-middle mb-0">
-                                <thead><tr><th>Version</th><th>Status</th><th>Actions</th></tr></thead>
+                                <thead><tr><th>Version</th><th>Chrome ADMX</th><th>Status</th><th>Actions</th></tr></thead>
                                 <tbody>
                                     @foreach (var v in policy.Versions.OrderByDescending(x => x.CreatedAt))
                                     {
                                         <tr>
                                             <td>@v.Version</td>
+                                            <td>
+                                                @if (!string.IsNullOrEmpty(v.AdmxVersion))
+                                                {
+                                                    <span class="badge text-bg-light border" title="Chrome ADMX template version this policy was authored against">
+                                                        <i class="bi bi-google me-1"></i>@v.AdmxVersion
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-secondary">—</span>
+                                                }
+                                            </td>
                                             <td><span class="badge text-bg-@VersionBadge(v.Status)">@v.Status</span></td>
                                             <td>
                                                 @if (v.Status == PolicyVersionStatus.Draft)
