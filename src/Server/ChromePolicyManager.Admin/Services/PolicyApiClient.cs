@@ -278,6 +278,8 @@ public class ValidationResultDto
 
 public enum PolicyVersionStatus { Draft, Active, Archived }
 
+public enum PolicyScope { Mandatory = 0, Recommended = 1 }
+
 public class AssignmentDto
 {
     public Guid Id { get; set; }
@@ -285,7 +287,7 @@ public class AssignmentDto
     public string EntraGroupId { get; set; } = "";
     public string GroupName { get; set; } = "";
     public int Priority { get; set; }
-    public int Scope { get; set; } // 0=Mandatory, 1=Recommended
+    public PolicyScope Scope { get; set; } // serialized by the API as "Mandatory"/"Recommended"
     public bool Enabled { get; set; }
     public bool PushRemediationEnabled { get; set; }
     public DateTime CreatedAt { get; set; }

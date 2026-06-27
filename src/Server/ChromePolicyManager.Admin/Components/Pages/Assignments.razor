@@ -40,7 +40,7 @@ else
                                     <i class="bi bi-people text-brand"></i> @a.GroupName
                                 </div>
                             </td>
-                            <td><span class="badge text-bg-@(a.Scope == 0 ? "danger" : "info")">@(a.Scope == 0 ? "Mandatory" : "Recommended")</span></td>
+                            <td><span class="badge text-bg-@(a.Scope == PolicyScope.Mandatory ? "danger" : "info")">@(a.Scope == PolicyScope.Mandatory ? "Mandatory" : "Recommended")</span></td>
                             <td><span class="badge text-bg-light border">@a.Priority</span></td>
                             <td class="mono small">@a.PolicySetVersionId.ToString()[..8]…</td>
                             <td>

@@ -84,7 +84,7 @@
         {
             _loadedFor = Assignment.Id;
             _priority = Assignment.Priority;
-            _scope = Assignment.Scope;
+            _scope = (int)Assignment.Scope;
             _selectedGroup = new EntraGroupDto { Id = Assignment.EntraGroupId, DisplayName = Assignment.GroupName };
             _groupSearch = Assignment.GroupName;
             _results = [];
@@ -128,7 +128,7 @@
             string? entraGroupId = _selectedGroup.Id != Assignment.EntraGroupId ? _selectedGroup.Id : null;
             string? groupName = entraGroupId != null ? _selectedGroup.DisplayName : null;
             int? priority = _priority != Assignment.Priority ? _priority : null;
-            int? scope = _scope != Assignment.Scope ? _scope : null;
+            int? scope = _scope != (int)Assignment.Scope ? _scope : null;
 
             if (entraGroupId == null && priority == null && scope == null)
             {
