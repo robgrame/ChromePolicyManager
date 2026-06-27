@@ -361,4 +361,49 @@ Impatto trascurabile in dev; il valore è **sicurezza + resilienza**, non rispar
 
 ---
 
+## 15. Decisioni (§14 risolte) e note di implementazione dello scaffold
+
+Decisioni prese dal proprietario:
+1. **GroupSearch read-only** resta sull'API (autocomplete, nessun decoupling).
+2. **Retry/DLQ**: `maxDeliveryCount = 5` su `cpm-commands`; back-off gestito dal runtime SB; DLQ su scadenza/esaurimento tentativi. Alert su DLQ da configurare lato monitoring.
+3. **Stato in tempo reale**: **SignalR** (`CommandStatusHub`).
+4. **device-reports**: da migrare sul Worker (fase successiva).
+5. **Tier SB**: **Basic**, idempotenza a livello applicativo (riga `PrivilegedCommands`).
+
+Raffinamento architetturale adottato nello scaffold (deviazione rispetto alle bozze §5–§9):
+- **Il Worker NON accede a SQL.** L'API arricchisce ogni payload con tutti i dati necessari
+  (es. `EntraGroupId` + `GroupName` per il dispatch). Questo mantiene SQL di proprietà dell'API,
+  riduce la superficie di private endpoint del Worker e semplifica la RBAC.
+- **Stato via coda dedicata.** Il Worker non può scrivere direttamente sull'hub SignalR dell'API,
+  quindi pubblica `CommandStatusUpdate` sulla coda **`cpm-command-status`**; un `BackgroundService`
+  dell'API (`CommandStatusRelay`) la consuma, aggiorna la riga `PrivilegedCommands` e fa il
+  broadcast SignalR ai client del portale.
+- **Webhook membership.** Anziché un comando generico `GroupMembershipChanged` che richiederebbe
+  letture SQL nel Worker, l'API (che possiede SQL) risolve le assegnazioni impattate e accoda
+  direttamente `PushRemediationDispatch` concreti. Il comando `WebhookSubscriptionSync` (payload =
+  elenco group id attivi) resta per la riconciliazione delle subscription Graph ed è **stub** in
+  attesa della migrazione (fase 2).
+
+### Stato implementazione (scaffold compilante, feature-flag OFF di default)
+| Componente | Stato |
+|---|---|
+| `ChromePolicyManager.Contracts` (envelope/tipi/payload/stato) | ✅ |
+| Entità EF `PrivilegedCommand` + creazione tabella idempotente | ✅ |
+| `CommandQueueClient` + `ICommandPublisher` (riga Pending + enqueue) | ✅ |
+| `CommandStatusHub` (SignalR) + `CommandStatusRelay` | ✅ |
+| Feature flag `PrivilegedActions:Mode` (Inline default \| Queued) | ✅ |
+| `/api/commands` (lista/dettaglio stato) | ✅ |
+| Worker Functions isolated + `CommandHandlerFunction` (trigger SB) | ✅ |
+| `PrivilegedGraphActions` (porting push remediation, no SQL/Audit) | ✅ |
+| `WebhookSubscriptionSync` nel Worker | ⏳ stub (fase 2) |
+| Migrazione `device-reports` sul Worker | ⏳ fase 3 |
+| Infra: code `cpm-commands`/`cpm-command-status` + modulo Worker opt-in | ✅ |
+| Sottoscrizione SignalR lato portale Admin | ⏳ fase 2 |
+
+Con `PrivilegedActions:Mode` assente o `Inline`, il comportamento resta identico a oggi (l'API
+esegue le chiamate Graph in-process). Impostando `Queued` (e con Service Bus configurato), i
+dispatch vengono accodati al Worker.
+
+---
+
 *Fine ADR-001.*
