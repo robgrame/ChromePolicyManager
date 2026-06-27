@@ -33,7 +33,7 @@ public static class DeviceEndpoints
 
         // Device reports compliance status - async via Service Bus when available
         group.MapPost("/{deviceId}/report", async (string deviceId, [FromBody] DeviceReportRequest request,
-            DeviceReportQueue queue, DeviceReportingService service) =>
+            DeviceReportQueue queue, DeviceReportingService service, IEventPublisher events) =>
         {
             if (request.DeviceId != deviceId)
                 return Results.BadRequest("DeviceId in URL must match body");
@@ -47,6 +47,18 @@ public static class DeviceEndpoints
 
             // Fallback: process synchronously if Service Bus not configured
             var report = await service.SubmitReportAsync(request);
+            await events.PublishDevicePolicyStatusAsync(new ChromePolicyManager.Contracts.DevicePolicyStatusChangedData
+            {
+                DeviceId = request.DeviceId,
+                DeviceName = request.DeviceName,
+                UserPrincipalName = request.UserPrincipalName,
+                Status = request.Status.ToString(),
+                AppliedVersion = request.AppliedVersion,
+                ScriptVersion = request.ScriptVersion,
+                PolicyKeysWritten = request.PolicyKeysWritten,
+                PolicyKeysRemoved = request.PolicyKeysRemoved,
+                Errors = request.Errors
+            });
             return Results.Ok(new { ReportId = report.Id, Received = report.ReportedAt });
         }).WithName("SubmitDeviceReport");
 

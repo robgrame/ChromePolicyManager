@@ -95,6 +95,9 @@ builder.Services.AddScoped<ICommandPublisher, CommandPublisher>();
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<CommandStatusRelay>();
 
+// Event Grid status pipeline: publish device policy-application status for portal fan-out.
+builder.Services.AddSingleton<IEventPublisher, EventGridEventPublisher>();
+
 // Graph change notifications - webhook subscription management
 builder.Services.AddHostedService<GroupChangeNotificationService>();
 
@@ -190,7 +193,9 @@ app.MapCatalogEndpoints();
 app.MapWebhookEndpoints();
 app.MapConfigEndpoints();
 app.MapCommandEndpoints();
+app.MapEventGridEndpoints();
 app.MapHub<CommandStatusHub>(CommandStatusHub.Path);
+app.MapHub<PolicyStatusHub>(PolicyStatusHub.Path);
 
 // Health check
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))

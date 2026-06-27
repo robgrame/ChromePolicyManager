@@ -98,6 +98,21 @@ public class DeviceReportProcessor : BackgroundService
             var reportingService = scope.ServiceProvider.GetRequiredService<DeviceReportingService>();
             await reportingService.SubmitReportAsync(request);
 
+            // Fan out policy-application status (Event Grid -> API webhook -> SignalR -> portal).
+            var eventPublisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
+            await eventPublisher.PublishDevicePolicyStatusAsync(new Contracts.DevicePolicyStatusChangedData
+            {
+                DeviceId = request.DeviceId,
+                DeviceName = request.DeviceName,
+                UserPrincipalName = request.UserPrincipalName,
+                Status = request.Status.ToString(),
+                AppliedVersion = request.AppliedVersion,
+                ScriptVersion = request.ScriptVersion,
+                PolicyKeysWritten = request.PolicyKeysWritten,
+                PolicyKeysRemoved = request.PolicyKeysRemoved,
+                Errors = request.Errors
+            });
+
             // Check for alert conditions
             await EvaluateAlertsAsync(scope.ServiceProvider, request);
 
