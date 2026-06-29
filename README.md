@@ -335,34 +335,36 @@ Instead of relying on Intune's ADMX ingestion pipeline — with the Settings Cat
 Device-facing endpoints are protected by **Azure API Management** acting as a security gateway. The backend API never receives unauthenticated device traffic.
 
 ```
-┌──────────────┐     OAuth2 Token     ┌──────────────┐   Managed Identity   ┌──────────────┐
+┌──────────────┐    mTLS client cert   ┌──────────────┐   Managed Identity   ┌──────────────┐
 │   Device     │ ───────────────────▶ │    APIM      │ ────────────────────▶ │  Backend API │
-│ (PowerShell) │                      │   Gateway    │                       │  (.NET 10)   │
-└──────────────┘                      └──────────────┘                       └──────────────┘
-                                            │
-                                      ┌─────┴─────┐
-                                      │ Validates  │
-                                      │ device JWT │
-                                      │ Rate limits│
-                                      │ Strips     │
-                                      │ spoofable  │
-                                      │ headers    │
-                                      └───────────┘
+│ (PowerShell) │   (issued by the     │   Gateway    │                       │  (.NET 10)   │
+└──────────────┘    customer PKI)      └──────────────┘                       └──────────────┘
+                                             │
+                                       ┌─────┴──────┐
+                                       │ Validates   │
+                                       │ client cert │
+                                       │ vs trusted  │
+                                       │ CA chain    │
+                                       │ Rate limits │
+                                       │ Strips      │
+                                       │ spoofable   │
+                                       │ headers     │
+                                       └────────────┘
 ```
 
 **Security flow:**
-1. Device acquires OAuth2 token (client credentials + device certificate) from Entra ID
-2. APIM validates JWT (issuer, audience, expiry, required claims)
+1. Device presents a **client certificate issued by the customer's PKI** — deployed to the device via Intune (SCEP/PKCS) — over **mTLS**
+2. APIM validates the client certificate against the **trusted CA chain** configured in CPM (Root + Subordinate CAs)
 3. APIM rate-limits per device identity (30 calls/hour/device)
 4. APIM strips any client-supplied identity headers (anti-spoofing)
-5. APIM sets trusted `X-Forwarded-Device-Id` from validated JWT claims
-6. APIM authenticates to backend using its **managed identity** (no shared secrets)
-7. Backend middleware verifies the request's `appid` claim matches APIM's identity
+5. APIM sets a trusted `X-Forwarded-Device-Id` derived from the validated certificate
+6. APIM authenticates to the backend using its **managed identity** (no shared secrets)
+7. Backend middleware verifies the request originates from APIM and re-validates the client certificate against the configured CA chain
 
 **Separation of concerns:**
 | Layer | Responsibility |
 |-------|---------------|
-| APIM | Device auth, rate limiting, DDoS protection, request logging |
+| APIM | Device mTLS (client certificate), rate limiting, DDoS protection, request logging |
 | Backend | Business logic, policy resolution, database, Graph API |
 | Admin UI | Direct Entra ID JWT auth (doesn't go through APIM) |
 
@@ -457,7 +459,7 @@ The default Bicep deployment uses development-friendly SKUs. For production scal
 | API | .NET 10, Minimal API, Entity Framework Core 10 |
 | Admin UI | Blazor Server, MudBlazor 8 |
 | Database | Azure SQL (Entra-only auth), SQLite fallback for development |
-| Auth | Microsoft Identity Web 3.x, MSAL, Device Certificates |
+| Auth | Microsoft Identity Web 3.x, MSAL, mTLS client certificates (customer PKI) |
 | Group Resolution | Microsoft Graph SDK 5.x + Change Notifications |
 | Messaging | Azure Service Bus (async device reports) |
 | Config | Azure App Configuration |
