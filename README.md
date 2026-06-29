@@ -1,6 +1,6 @@
 # Chrome Policy Manager
 
-> **Server-side Chrome policy delivery for Entra ID–only (Azure AD joined) devices — bypassing the Group Policy dependency that breaks ADMX-based Chrome settings on cloud-managed endpoints.**
+> **Server-side Chrome policy delivery for Entra ID–only (Azure AD joined) devices — delivering up-to-date Chrome policies without the Intune Settings Catalog lag and the limitations of ADMX import.**
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-purple)](https://dotnet.microsoft.com/)
 [![Azure](https://img.shields.io/badge/Azure-Deployed-blue)](https://azure.microsoft.com/)
@@ -310,27 +310,23 @@ Client Device → API: "What policies apply to me?" (GET /devices/{id}/effective
               Return: { mandatory: {...}, recommended: {...}, hash: "abc123" }
 ```
 
-## 🔬 Root Cause Analysis
+## 🔬 How Direct Registry Delivery Works
 
-### Why Intune Settings Catalog Fails for Chrome
+### Why bypass the Settings Catalog / ADMX import
 
-1. **Intune ADMX ingestion** writes to `HKLM\SOFTWARE\Microsoft\PolicyManager\providers\{GUID}\...`
-2. This relies on **GP Client Service** to mirror to `HKLM\SOFTWARE\Policies\Google\Chrome`
-3. On Entra ID–only devices, GP Client mirroring is **broken** (no `RegisterGPNotification`, no domain join)
-4. Chrome reads **only** from `HKLM\SOFTWARE\Policies\Google\Chrome` — policies never arrive
+Instead of relying on Intune's ADMX ingestion pipeline — with the Settings Catalog lag and ADMX import limits described above — Chrome Policy Manager writes Chrome policies **directly** to the registry keys Chrome already reads. New policies are available the moment the catalog is imported into CPM, independent of the Intune release cadence.
 
 ### Why Direct Registry Write Works
 
-- Chrome's `PolicyLoaderWin` reads `HKLM\SOFTWARE\Policies\Google\Chrome` **unconditionally**
-- No domain-join check gates registry policy reading
-- Chrome polls registry every 15 minutes (`kReloadInterval = base::Minutes(15)`)
+- Chrome's `PolicyLoaderWin` reads `HKLM\SOFTWARE\Policies\Google\Chrome` (and the `HKCU` equivalent) **unconditionally**
+- Registry-based policy loading does **not** require Active Directory, a domain join, or Group Policy
+- Chrome polls the registry every 15 minutes (`kReloadInterval = base::Minutes(15)`)
 - Entra ID–only devices get `FULLY_TRUSTED` management authority — no policy filtering
 
 ### Source Code Evidence (Chromium)
 
-- `PolicyLoaderWin::InitOnBackgroundThread()` — requires `RegisterGPNotification()` success
-- `mdm_utils.cc::IsEnrolledToDomain()` — GP registry path check fails on cloud-only devices
-- `WinGPOListProvider` — depends on Active Directory infrastructure not present on Entra-only devices
+- `PolicyLoaderWin` loads machine policies from `HKLM\SOFTWARE\Policies\Google\Chrome` and user policies from the `HKCU` hive
+- The registry policy provider is always active on Windows, regardless of join state — so writing the keys directly is sufficient for Chrome to apply them
 
 ## 🛡️ Security
 
@@ -341,7 +337,7 @@ Device-facing endpoints are protected by **Azure API Management** acting as a se
 ```
 ┌──────────────┐     OAuth2 Token     ┌──────────────┐   Managed Identity   ┌──────────────┐
 │   Device     │ ───────────────────▶ │    APIM      │ ────────────────────▶ │  Backend API │
-│ (PowerShell) │                      │   Gateway    │                       │  (.NET 9)    │
+│ (PowerShell) │                      │   Gateway    │                       │  (.NET 10)   │
 └──────────────┘                      └──────────────┘                       └──────────────┘
                                             │
                                       ┌─────┴─────┐
