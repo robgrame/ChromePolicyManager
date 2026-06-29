@@ -9,41 +9,51 @@
 
 ## 🎯 The Problem
 
-Chrome policies deployed via **Intune Settings Catalog** (ADMX-backed) **fail silently** on Entra ID–only joined devices. This happens because:
+Managing Chrome policies through **Intune** is slow and constrained:
 
-1. **GP Notification dependency** — Chrome's `PolicyLoaderWin` calls `RegisterGPNotification()` which requires a domain-joined machine
-2. **Domain join gate** — `mdm_utils.cc` checks `IsEnrolledToDomain()` before applying policies
-3. **ADMX registry mirroring** — Intune writes to `HKLM:\SOFTWARE\Microsoft\PolicyManager\providers\...` but the GP Client Service never mirrors them to `HKLM:\SOFTWARE\Policies\Google\Chrome` on cloud-only devices
-
-This affects **ALL Chrome policies equally** on cloud-only joined devices — not just specific ones.
+1. **Settings Catalog lag** — Chrome settings exposed via the **Intune Settings Catalog** typically trail the latest Chrome release by **~2 months**, so newly added policies aren't available when you need them.
+2. **ADMX import limits** — Importing Chrome's ADMX as a custom template is the workaround, but it has hard limitations:
+   - **Max 20 ADMX files** can be imported per tenant
+   - **Policy duplication** — imported policies are duplicated in the update catalog, cluttering the experience
+   - **No clean removal** — an old ADMX cannot be deleted while it is still referenced by a custom template policy
+3. **Operational friction** — keeping templates current means re-importing and reconciling assignments on every Chrome version bump.
 
 ## 💡 The Solution
 
-Chrome Policy Manager implements a **server-side policy resolution engine** that delivers Chrome policies directly to device registries via Intune Proactive Remediation scripts, completely bypassing the broken GP pipeline.
+Chrome Policy Manager implements a **server-side policy resolution engine** that delivers Chrome policies directly to device registries via Intune Proactive Remediation scripts, decoupling policy delivery from the Settings Catalog and ADMX import constraints.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ARCHITECTURE                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌───────────┐    ┌──────────────────────────┐  │
-│  │  Admin   │───▶│  REST API │◀───│  Intune Remediation      │  │
-│  │  UI      │    │  (.NET 9) │    │  (PowerShell scripts)    │  │
-│  │ (Blazor) │    └─────┬─────┘    └──────────────────────────┘  │
-│  └──────────┘          │                                         │
-│                   ┌────┴────┐                                    │
-│                   │ SQL DB  │  ← PolicySets, Versions,           │
-│                   │  (S2)   │    Assignments, DeviceState         │
-│                   └────┬────┘                                    │
-│                        │                                         │
-│              ┌─────────┼─────────┐                               │
-│              │         │         │                               │
-│         ┌────┴────┐ ┌──┴───┐ ┌──┴──────────┐                   │
-│         │ MS Graph│ │ Svc  │ │ Graph Change │                   │
-│         │ (delta) │ │ Bus  │ │ Webhooks     │                   │
-│         └─────────┘ └──────┘ └─────────────┘                   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                             ARCHITECTURE                               │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│   ┌──────────────┐   SignalR    ┌───────────────┐   APIM    ┌───────┐ │
+│   │  Admin UI     │◀───realtime──│   REST API    │◀──mTLS───▶│ Intune│ │
+│   │  (Blazor      │── REST ─────▶│  (.NET 10)    │           │ Remed.│ │
+│   │   Server)     │              │  Min. API     │           │ (PS1) │ │
+│   └──────────────┘               └──┬───┬───┬────┘           └───────┘ │
+│        ▲  PolicyStatusHub           │   │   │                          │
+│        │  CommandStatusHub          │   │   └────────────┐             │
+│        │                       ┌────┴──┐│           ┌─────┴──────┐     │
+│   ┌────┴───────┐               │ SQL DB ││           │  MS Graph  │     │
+│   │ Event Grid  │◀─publish(MI)─┤  (PE)  ││           │  (delta +  │     │
+│   │ topic       │              └────────┘│           │  webhooks) │     │
+│   │ policy-status│──webhook──────────────┘           └────────────┘     │
+│   └─────────────┘                  │                                    │
+│                          ┌─────────┴──────────┐                        │
+│                          │   Service Bus       │  cpm-commands          │
+│                          │   (MI only,         │  cpm-command-status    │
+│                          │    disableLocalAuth)│  device-reports        │
+│                          └─────────┬──────────┘                        │
+│                                    │ trigger                            │
+│                          ┌─────────┴──────────┐                        │
+│                          │  Worker             │  privileged Graph      │
+│                          │  (Azure Functions)  │  actions (push remed., │
+│                          │                     │  membership sync)      │
+│                          └────────────────────┘                        │
+│                                                                        │
+│   Cross-cutting:  Key Vault · App Configuration · App Insights         │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## ✨ Key Features
@@ -63,6 +73,48 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 | **Push Remediation Trigger** | Optional Windows-style push: cycle assignment group devices and invoke on-demand remediation commands (batched) |
 | **Audit Trail** | Full audit logging for all policy changes and device interactions |
 
+## 📸 Screenshots
+
+### Dashboard
+Compliance overview at a glance — total devices, compliant/error/offline counters, and the most recent device reports with policy hash, Chrome version and last contact.
+
+![Dashboard](docs/screenshots/1.png)
+
+### Policy Catalog
+Browse the ingested Chrome ADMX catalog (722 policies) with search, category/scope filters, type badges and an "update available" banner when Google ships a newer template.
+
+![Policy Catalog](docs/screenshots/2.png)
+
+### Add Policy to a PolicySet
+Per-policy editor with inline description, value guidance, target PolicySet selection and a registry write preview before adding.
+
+![Add Policy to PolicySet](docs/screenshots/3.png)
+
+### PolicySet Versions
+Immutable, hash-tracked versions per PolicySet — inspect the resolved Chrome policy keys (JSON) for any version, with the Chrome ADMX template version it was built against.
+
+![PolicySet Versions](docs/screenshots/4.png)
+
+### Assign to Entra ID Group
+Assign a policy version to an Entra ID security group with priority-based conflict resolution, Mandatory/Recommended scope, and optional Windows-style push remediation.
+
+![Assign Policy to Group](docs/screenshots/5.png)
+
+### Policy Assignments
+All assignments with group, scope, priority, target policy version, enabled state and push-remediation toggle.
+
+![Policy Assignments](docs/screenshots/6.png)
+
+### Device Monitoring
+Per-device observability — compliance status, policy hash, Chrome/OS versions, hardware model, script version, keys written and last contact.
+
+![Device Monitoring](docs/screenshots/7.png)
+
+### Client Certificate Trust Configuration
+Manage the trusted CA chain (Root/Subordinate) used to validate device client certificates on `/api/devices/*`, persisted to Azure App Configuration and consumed by the API.
+
+![Client Certificate Configuration](docs/screenshots/8.png)
+
 ## 🏗️ Project Structure
 
 ```
@@ -71,12 +123,20 @@ ChromePolicyManager/
 │   ├── Server/
 │   │   ├── ChromePolicyManager.Api/        # REST API (.NET 10 Minimal API)
 │   │   │   ├── Data/                       # EF Core DbContext + models
-│   │   │   ├── Endpoints/                  # Policy, Assignment, Device, Catalog, Monitoring, Webhook
+│   │   │   ├── Endpoints/                  # Policy, Assignment, Device, Catalog, Monitoring, Webhook, Command, EventGrid, Config
+│   │   │   ├── Hubs/                        # SignalR: PolicyStatusHub, CommandStatusHub (realtime portal)
 │   │   │   ├── Middleware/                 # APIM Gateway authentication middleware
 │   │   │   ├── Models/                     # PolicySet, Version, Assignment, CatalogEntry, DeviceLog
-│   │   │   └── Services/                   # AdmxParser, EffectivePolicy, Graph, Reporting, Validator
-│   │   └── ChromePolicyManager.Admin/      # Blazor Server Admin UI (MudBlazor)
-│   │       └── Components/Pages/           # Dashboard, Catalog, Policies, Assignments, Devices
+│   │   │   └── Services/                   # AdmxParser, EffectivePolicy, Graph, Reporting, Validator,
+│   │   │                                   #   CommandPublisher, EventGridEventPublisher, PushRemediation
+│   │   ├── ChromePolicyManager.Admin/      # Blazor Server Admin UI (MudBlazor)
+│   │   │   └── Components/Pages/           # Dashboard, Catalog, Policies, Assignments, Devices
+│   │   └── ChromePolicyManager.Worker/     # Azure Functions worker (Service Bus-triggered)
+│   │       ├── Functions/                  # CommandHandlerFunction (cpm-commands trigger)
+│   │       └── Services/                   # PrivilegedGraphActions, StatusPublisher
+│   ├── Shared/
+│   │   └── ChromePolicyManager.Contracts/  # Shared contracts: PrivilegedCommand, CommandStatus,
+│   │                                       #   PolicyStatusEvents, QueueNames
 │   └── Client/
 │       ├── Detect-ChromePolicy.ps1         # Intune detection script (supports inline remediation)
 │       └── Remediate-ChromePolicy.ps1      # Intune remediation script
