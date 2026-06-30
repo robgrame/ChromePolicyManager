@@ -591,6 +591,51 @@ function Revoke-CertPrivateKeyRead {
     catch { Write-Log "Revoke-CertPrivateKeyRead failed for ${Account}: $_" "WARN" }
 }
 
+function Grant-UserPolicyKeyWrite {
+    # Windows ACL-locks HKCU\SOFTWARE\Policies: the interactive (non-elevated) user
+    # only has ReadKey there, so the user-context task cannot create
+    # HKCU\Software\Policies\Google\Chrome[\Recommended] on its own. The SYSTEM
+    # orchestrator (FullControl on the loaded HKEY_USERS\<SID> hive) therefore ensures
+    # the Google policy key exists and grants the user a temporary, inheritable
+    # FullControl ACE so the task can write its HKCU policies. Revoked afterwards.
+    # Returns the registry path that was granted (for later revoke) or $null.
+    param([PSCustomObject]$User)
+    try {
+        $base = "Microsoft.PowerShell.Core\Registry::HKEY_USERS\$($User.Sid)\SOFTWARE\Policies"
+        if (-not (Test-Path $base)) {
+            Write-Log "User hive HKEY_USERS\$($User.Sid)\SOFTWARE\Policies not loaded; skipping policy-key grant" "WARN"
+            return $null
+        }
+        $googlePath = "$base\Google"
+        if (-not (Test-Path $googlePath)) { New-Item -Path $googlePath -Force | Out-Null }
+
+        $acl = Get-Acl -Path $googlePath
+        $rule = New-Object System.Security.AccessControl.RegistryAccessRule(
+            $User.Account, "FullControl",
+            "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $googlePath -AclObject $acl
+        Write-Log "Granted HKCU policy write to $($User.Account) on $googlePath"
+        return $googlePath
+    }
+    catch { Write-Log "Grant-UserPolicyKeyWrite failed for $($User.Account): $_" "WARN"; return $null }
+}
+
+function Revoke-UserPolicyKeyWrite {
+    param([string]$RegistryPath, [string]$Account)
+    if ([string]::IsNullOrWhiteSpace($RegistryPath) -or -not (Test-Path $RegistryPath)) { return }
+    try {
+        $acl = Get-Acl -Path $RegistryPath
+        $rule = New-Object System.Security.AccessControl.RegistryAccessRule(
+            $Account, "FullControl",
+            "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.RemoveAccessRule($rule) | Out-Null
+        Set-Acl -Path $RegistryPath -AclObject $acl
+        Write-Log "Revoked HKCU policy write from $Account on $RegistryPath"
+    }
+    catch { Write-Log "Revoke-UserPolicyKeyWrite failed for ${Account}: $_" "WARN" }
+}
+
 function Invoke-UserPolicyTask {
     # Registers, runs and cleans up a transient scheduled task that executes the user
     # script as $User.Account, then reads the result JSON from that user's profile.
@@ -688,6 +733,7 @@ function Invoke-UserPolicyOrchestration {
     foreach ($u in $users) {
         $summary.Total++
         $keyFile = Grant-CertPrivateKeyRead -Cert $ClientCert -Account $u.Account
+        $policyKeyPath = Grant-UserPolicyKeyWrite -User $u
         try {
             $r = Invoke-UserPolicyTask -User $u -UserScriptPath $UserScriptDeployPath -DeviceId $DeviceId
             if ($r.Status -eq "Success") { $summary.Succeeded++ } else { $summary.Failed++ }
@@ -696,6 +742,7 @@ function Invoke-UserPolicyOrchestration {
         }
         finally {
             Revoke-CertPrivateKeyRead -KeyFile $keyFile -Account $u.Account
+            Revoke-UserPolicyKeyWrite -RegistryPath $policyKeyPath -Account $u.Account
         }
     }
     return $summary

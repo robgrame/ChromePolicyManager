@@ -178,7 +178,16 @@ function Get-ManagedKeys {
     try {
         if (Test-Path $ManifestPath) {
             $json = (Get-ItemProperty -Path $ManifestPath -Name $ManifestKeysValue -ErrorAction SilentlyContinue).$ManifestKeysValue
-            if ($json) { return ($json | ConvertFrom-Json) }
+            if ($json) {
+                $obj = $json | ConvertFrom-Json
+                # Coerce to clean string arrays: Windows PowerShell serializes empty
+                # arrays as null/[null], so strip any null/blank entries to keep stale-key
+                # removal from ever operating on a null value name.
+                return @{
+                    mandatory   = @($obj.mandatory   | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    recommended = @($obj.recommended | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                }
+            }
         }
     }
     catch { }
