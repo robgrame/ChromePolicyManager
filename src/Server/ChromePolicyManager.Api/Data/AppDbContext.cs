@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<UserPolicyState> UserPolicyStates => Set<UserPolicyState>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<PolicyCatalogEntry> PolicyCatalog => Set<PolicyCatalogEntry>();
+    public DbSet<AdmxTemplate> AdmxTemplates => Set<AdmxTemplate>();
     public DbSet<DeviceLog> DeviceLogs => Set<DeviceLog>();
     public DbSet<PrivilegedCommand> PrivilegedCommands => Set<PrivilegedCommand>();
 
@@ -77,9 +78,17 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<PolicyCatalogEntry>(e =>
         {
             e.HasKey(x => x.Id);
-            e.HasIndex(x => new { x.Name, x.IsRecommended }).IsUnique();
+            e.HasIndex(x => new { x.AdmxTemplateId, x.Name, x.IsRecommended }).IsUnique();
+            e.HasIndex(x => x.AdmxTemplateId);
             e.HasIndex(x => x.Category);
             e.HasIndex(x => x.DataType);
+        });
+
+        modelBuilder.Entity<AdmxTemplate>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Version).IsUnique();
+            e.HasIndex(x => x.Status);
         });
 
         modelBuilder.Entity<DeviceLog>(e =>

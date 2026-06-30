@@ -44,7 +44,7 @@ public class PolicyService
             .FirstOrDefaultAsync(p => p.Id == id);
     }
 
-    public async Task<PolicySetVersion> CreateVersionAsync(Guid policySetId, string version, string settingsJson, string? actor = null)
+    public async Task<PolicySetVersion> CreateVersionAsync(Guid policySetId, string version, string settingsJson, string? actor = null, string? admxVersion = null)
     {
         var hash = ComputeHash(settingsJson);
         var policyVersion = new PolicySetVersion
@@ -53,7 +53,7 @@ public class PolicyService
             Version = version,
             SettingsJson = settingsJson,
             Hash = hash,
-            AdmxVersion = await GetCatalogTemplateVersionAsync(),
+            AdmxVersion = !string.IsNullOrWhiteSpace(admxVersion) ? admxVersion : await GetCatalogTemplateVersionAsync(),
             Status = PolicyVersionStatus.Draft,
             CreatedBy = actor
         };
@@ -65,11 +65,18 @@ public class PolicyService
     }
 
     /// <summary>
-    /// Returns the Chrome ADMX template version currently loaded in the catalog, used to stamp
+    /// Returns the Chrome ADMX template version currently Active in the registry, used to stamp
     /// new policy versions so we can trace which Chrome version they were authored against.
+    /// Falls back to any catalog entry's version when no template is marked Active.
     /// </summary>
     private async Task<string?> GetCatalogTemplateVersionAsync()
     {
+        var active = await _db.AdmxTemplates
+            .Where(t => t.Status == AdmxTemplateStatus.Active)
+            .Select(t => t.Version)
+            .FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(active)) return active;
+
         var version = await _db.PolicyCatalog
             .Select(e => e.TemplateVersion)
             .FirstOrDefaultAsync();

@@ -96,6 +96,7 @@ builder.Services.AddSingleton(sp =>
 // Application services
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<PolicyService>();
+builder.Services.AddScoped<AdmxCatalogService>();
 builder.Services.AddScoped<AssignmentService>();
 builder.Services.AddScoped<PushRemediationService>();
 builder.Services.AddScoped<EffectivePolicyService>();
@@ -233,6 +234,64 @@ var app = builder.Build();
                 CreatedUtc DATETIME2 NOT NULL,
                 UpdatedUtc DATETIME2 NULL
             );
+
+            IF OBJECT_ID('AdmxTemplates', 'U') IS NULL
+            CREATE TABLE AdmxTemplates (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                Version NVARCHAR(100) NOT NULL,
+                DisplayName NVARCHAR(200) NULL,
+                Source NVARCHAR(50) NOT NULL DEFAULT 'url',
+                Status INT NOT NULL DEFAULT 0,
+                PolicyCount INT NOT NULL DEFAULT 0,
+                MandatoryCount INT NOT NULL DEFAULT 0,
+                RecommendedCount INT NOT NULL DEFAULT 0,
+                CategoryCount INT NOT NULL DEFAULT 0,
+                ImportedAt DATETIME2 NOT NULL,
+                Notes NVARCHAR(MAX) NULL
+            );
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AdmxTemplates_Version' AND object_id = OBJECT_ID('AdmxTemplates'))
+                CREATE UNIQUE INDEX IX_AdmxTemplates_Version ON AdmxTemplates (Version);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AdmxTemplates_Status' AND object_id = OBJECT_ID('AdmxTemplates'))
+                CREATE INDEX IX_AdmxTemplates_Status ON AdmxTemplates (Status);
+
+            IF OBJECT_ID('PolicyCatalog', 'U') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PolicyCatalog') AND name = 'AdmxTemplateId')
+                ALTER TABLE PolicyCatalog ADD AdmxTemplateId UNIQUEIDENTIFIER NULL;
+        ");
+
+        // Second batch: backfill + unique-index swap. Runs after the column above is committed so
+        // T-SQL can reference PolicyCatalog.AdmxTemplateId (added in the previous batch).
+        await db.Database.ExecuteSqlRawAsync(@"
+            -- One-time backfill: adopt any pre-Option-B catalog into a single Active template.
+            IF OBJECT_ID('PolicyCatalog', 'U') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM PolicyCatalog WHERE AdmxTemplateId IS NULL)
+            AND NOT EXISTS (SELECT 1 FROM AdmxTemplates)
+            BEGIN
+                DECLARE @tid UNIQUEIDENTIFIER = NEWID();
+                DECLARE @ver NVARCHAR(100) = (
+                    SELECT TOP 1 NULLIF(LTRIM(RTRIM(TemplateVersion)), '')
+                    FROM PolicyCatalog
+                    WHERE NULLIF(LTRIM(RTRIM(TemplateVersion)), '') IS NOT NULL);
+                IF @ver IS NULL SET @ver = 'legacy';
+                INSERT INTO AdmxTemplates (Id, Version, Source, Status, PolicyCount, MandatoryCount, RecommendedCount, CategoryCount, ImportedAt)
+                SELECT @tid, @ver, 'url', 1,
+                    (SELECT COUNT(*) FROM PolicyCatalog),
+                    (SELECT COUNT(*) FROM PolicyCatalog WHERE IsRecommended = 0),
+                    (SELECT COUNT(*) FROM PolicyCatalog WHERE IsRecommended = 1),
+                    (SELECT COUNT(DISTINCT Category) FROM PolicyCatalog WHERE IsRecommended = 0),
+                    SYSUTCDATETIME();
+                UPDATE PolicyCatalog SET AdmxTemplateId = @tid WHERE AdmxTemplateId IS NULL;
+            END
+
+            -- Swap the catalog uniqueness key to be per-template.
+            IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PolicyCatalog_Name_IsRecommended' AND object_id = OBJECT_ID('PolicyCatalog'))
+                DROP INDEX IX_PolicyCatalog_Name_IsRecommended ON PolicyCatalog;
+            IF OBJECT_ID('PolicyCatalog', 'U') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PolicyCatalog_AdmxTemplateId_Name_IsRecommended' AND object_id = OBJECT_ID('PolicyCatalog'))
+                CREATE UNIQUE INDEX IX_PolicyCatalog_AdmxTemplateId_Name_IsRecommended ON PolicyCatalog (AdmxTemplateId, Name, IsRecommended);
+            IF OBJECT_ID('PolicyCatalog', 'U') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PolicyCatalog_AdmxTemplateId' AND object_id = OBJECT_ID('PolicyCatalog'))
+                CREATE INDEX IX_PolicyCatalog_AdmxTemplateId ON PolicyCatalog (AdmxTemplateId);
         ");
     }
     catch { /* Column may already exist or DB not ready */ }

@@ -41,8 +41,14 @@ public class PolicyCatalogEntry
     /// <summary>Policy class: Machine, User, or Both</summary>
     public string PolicyClass { get; set; } = "Both";
 
-    /// <summary>Chrome ADMX template version this was imported from</summary>
+    /// <summary>Chrome ADMX template version this was imported from (denormalized from the owning template)</summary>
     public string TemplateVersion { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Owning ADMX template (Option B). Each catalog entry belongs to exactly one imported
+    /// template version, so multiple ADMX versions can coexist in the catalog.
+    /// </summary>
+    public Guid AdmxTemplateId { get; set; }
 
     public DateTime ImportedAt { get; set; } = DateTime.UtcNow;
 }

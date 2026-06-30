@@ -36,7 +36,7 @@ public static class PolicyEndpoints
             if (!validation.IsValid)
                 return Results.BadRequest(new { Errors = validation.Errors, Warnings = validation.Warnings });
 
-            var version = await service.CreateVersionAsync(id, request.Version, request.SettingsJson);
+            var version = await service.CreateVersionAsync(id, request.Version, request.SettingsJson, admxVersion: request.AdmxVersion);
             return Results.Created($"/api/policies/{id}/versions/{version.Id}",
                 new { Version = version, Validation = validation.Warnings.Any() ? validation : null });
         }).WithName("CreateVersion");
@@ -85,5 +85,5 @@ public static class PolicyEndpoints
 }
 
 public record CreatePolicySetRequest(string Name, string Description);
-public record CreateVersionRequest(string Version, string SettingsJson);
+public record CreateVersionRequest(string Version, string SettingsJson, string? AdmxVersion = null);
 public record AddSettingRequest(string PolicyName, object Value);

@@ -8,7 +8,27 @@
     <div class="mb-3">
         <label class="form-label">Version <span class="text-danger">*</span></label>
         <input class="form-control" @bind="_version" @bind:event="oninput" placeholder="e.g. 1.0.0" />
-        @if (!string.IsNullOrEmpty(_catalogVersion))
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">
+            <i class="bi bi-google me-1"></i>Chrome ADMX template
+        </label>
+        @if (_templates.Any())
+        {
+            <select class="form-select" value="@_selectedAdmxVersion" @onchange="OnAdmxVersionChanged">
+                @foreach (var t in _templates)
+                {
+                    <option value="@t.Version">
+                        @t.Version — @t.Status (@t.PolicyCount policies)@(t.Status == "Active" ? " — default" : "")
+                    </option>
+                }
+            </select>
+            <div class="form-text">
+                This version will be authored against ADMX template <strong>@_selectedAdmxVersion</strong>.
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(_catalogVersion))
         {
             <div class="form-text">
                 <i class="bi bi-google me-1"></i>
@@ -173,8 +193,10 @@
     private List<PolicyCatalogEntryDto> _catalogResults = [];
     private string _catalogSearch = "";
     private bool _loadingCatalog;
-    private bool _catalogLoaded;
     private string _catalogVersion = "";
+
+    private List<AdmxTemplateDto> _templates = [];
+    private string _selectedAdmxVersion = "";
 
     private bool _addingPolicy;
     private PolicyCatalogEntryDto? _selectedEntry;
@@ -202,12 +224,37 @@
             if (!_catalogLoaded)
             {
                 _loadingCatalog = true;
-                try { _catalogEntries = await Api.GetCatalogAsync(); _catalogLoaded = true; }
+                try
+                {
+                    _templates = await Api.GetCatalogTemplatesAsync();
+                    var active = _templates.FirstOrDefault(t => t.Status == "Active") ?? _templates.FirstOrDefault();
+                    _selectedAdmxVersion = active?.Version ?? "";
+                    _catalogEntries = string.IsNullOrEmpty(_selectedAdmxVersion)
+                        ? await Api.GetCatalogAsync()
+                        : await Api.GetCatalogAsync(version: _selectedAdmxVersion);
+                    _catalogLoaded = true;
+                }
                 catch { }
                 finally { _loadingCatalog = false; }
             }
-            _catalogVersion = _catalogEntries.FirstOrDefault()?.TemplateVersion ?? "";
+            _catalogVersion = _selectedAdmxVersion.Length > 0
+                ? _selectedAdmxVersion
+                : _catalogEntries.FirstOrDefault()?.TemplateVersion ?? "";
         }
+    }
+
+    private bool _catalogLoaded;
+
+    private async Task OnAdmxVersionChanged(ChangeEventArgs e)
+    {
+        _selectedAdmxVersion = e.Value?.ToString() ?? "";
+        _catalogVersion = _selectedAdmxVersion;
+        _addingPolicy = false;
+        _selectedEntry = null;
+        _loadingCatalog = true;
+        try { _catalogEntries = await Api.GetCatalogAsync(version: _selectedAdmxVersion); }
+        catch { }
+        finally { _loadingCatalog = false; }
     }
 
     private static Dictionary<string, JsonElement> ParseSettings(string json)
@@ -281,7 +328,8 @@
             var settingsJson = _currentSettings.Any()
                 ? JsonSerializer.Serialize(_currentSettings, new JsonSerializerOptions { WriteIndented = true })
                 : "{}";
-            var result = await Api.CreateVersionAsync(PolicySet!.Id, _version, settingsJson);
+            var result = await Api.CreateVersionAsync(PolicySet!.Id, _version, settingsJson,
+                admxVersion: string.IsNullOrEmpty(_selectedAdmxVersion) ? null : _selectedAdmxVersion);
             _warnings = result.Validation?.Warnings ?? [];
             Toast.Success($"Version {_version} created (Status: Draft). Promote to activate.");
             await Close();
@@ -298,6 +346,7 @@
     private async Task Close()
     {
         _loadedFor = Guid.Empty;
+        _catalogLoaded = false;
         _addingPolicy = false;
         if (VisibleChanged.HasDelegate) await VisibleChanged.InvokeAsync(false);
     }

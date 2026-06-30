@@ -106,11 +106,11 @@ else if (_stats is null && !_loading)
                             <input class="form-control" @bind="_importVersion" placeholder="e.g. 136.0.7103.48" />
                         </div>
                         <div class="col-12 col-sm-3">
-                            <label class="form-label">Import Mode</label>
-                            <select class="form-select" @bind="_importMode">
-                                <option value="full">Full (replace all)</option>
-                                <option value="diff">Differential (delta only)</option>
-                            </select>
+                            <label class="form-label">After Import</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="activateUrl" @bind="_activateAfterImport" />
+                                <label class="form-check-label" for="activateUrl">Set as Active</label>
+                            </div>
                         </div>
                         <div class="col-12 col-sm-3">
                             <button class="btn btn-success w-100" disabled="@_importing" @onclick="ImportFromUrlAsync">
@@ -145,11 +145,11 @@ else if (_stats is null && !_loading)
                             <input class="form-control" @bind="_importVersion" placeholder="e.g. 136.0.7103.48" />
                         </div>
                         <div class="col-6 col-sm-2">
-                            <label class="form-label">Mode</label>
-                            <select class="form-select" @bind="_importMode">
-                                <option value="full">Full</option>
-                                <option value="diff">Diff</option>
-                            </select>
+                            <label class="form-label">After</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="activateZip" @bind="_activateAfterImport" />
+                                <label class="form-check-label" for="activateZip">Active</label>
+                            </div>
                         </div>
                         <div class="col-6 col-sm-2">
                             <button class="btn btn-success w-100" disabled="@(_selectedFile is null || _importing)" @onclick="ImportAsync">
@@ -193,6 +193,59 @@ else if (_stats is null && !_loading)
         </div>
     </div>
 </div>
+
+@* ADMX Templates registry *@
+@if (_templates.Count > 0)
+{
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center">
+            <i class="bi bi-stack me-2"></i>
+            <span class="fw-semibold">ADMX Template Registry</span>
+            <span class="badge text-bg-secondary ms-2">@_templates.Count</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr><th>Version</th><th>Status</th><th>Source</th><th>Policies</th><th>Mandatory</th><th>Recommended</th><th>Imported</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _templates)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@t.Version</td>
+                            <td><span class="badge text-bg-@StatusBadge(t.Status)">@t.Status</span></td>
+                            <td><span class="small text-secondary">@t.Source</span></td>
+                            <td>@t.PolicyCount</td>
+                            <td>@t.MandatoryCount</td>
+                            <td>@t.RecommendedCount</td>
+                            <td class="small">@t.ImportedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                @if (t.Status != "Active")
+                                {
+                                    <button class="btn btn-sm btn-outline-success me-1" title="Set as Active"
+                                            disabled="@_templateBusy" @onclick="() => ActivateTemplate(t)">
+                                        <i class="bi bi-check-circle"></i>
+                                    </button>
+                                }
+                                @if (t.Status == "Active")
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary me-1" title="Retire"
+                                            disabled="@_templateBusy" @onclick="() => RetireTemplate(t)">
+                                        <i class="bi bi-archive"></i>
+                                    </button>
+                                }
+                                <button class="btn btn-sm btn-outline-danger" title="Delete"
+                                        disabled="@(_templateBusy || t.Status == "Active")" @onclick="() => DeleteTemplate(t)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
 
 @* Filters + table *@
 @if (_entries.Count > 0 || _loading)
@@ -295,10 +348,13 @@ else if (_stats is null && !_loading)
 
     private IBrowserFile? _selectedFile;
     private string _importVersion = "";
-    private string _importMode = "full";
+    private bool _activateAfterImport;
     private bool _importing;
     private CatalogImportResultDto? _importResult;
     private string? _importError;
+
+    private List<AdmxTemplateDto> _templates = [];
+    private bool _templateBusy;
 
     private bool _showDetails;
     private PolicyCatalogEntryDto? _detailsEntry;
@@ -317,6 +373,8 @@ else if (_stats is null && !_loading)
             _stats = statsTask.Result;
             _categories = categoriesTask.Result;
             _policySets = policySetsTask.Result;
+
+            _templates = await Api.GetCatalogTemplatesAsync();
 
             if (_stats.TotalEntries > 0)
             {
@@ -346,7 +404,7 @@ else if (_stats is null && !_loading)
         try
         {
             // Empty version => API auto-detects the real version from the zip's VERSION file.
-            _importResult = await Api.ImportCatalogFromUrlAsync("", diffMode: false);
+            _importResult = await Api.ImportCatalogFromUrlAsync("", activate: _activateAfterImport);
             await ReloadAfterImport();
             Toast.Success($"Updated catalog to version {_importResult.TemplateVersion} ({_importResult.TotalParsed} policies)!");
         }
@@ -359,7 +417,7 @@ else if (_stats is null && !_loading)
         _importing = true; _importResult = null; _importError = null;
         try
         {
-            _importResult = await Api.ImportCatalogFromUrlAsync(_importVersion, _importMode == "diff");
+            _importResult = await Api.ImportCatalogFromUrlAsync(_importVersion, activate: _activateAfterImport);
             await ReloadAfterImport();
             Toast.Success($"Successfully imported {_importResult.TotalParsed} policies!");
         }
@@ -374,7 +432,7 @@ else if (_stats is null && !_loading)
         try
         {
             using var stream = _selectedFile.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024);
-            _importResult = await Api.ImportCatalogAsync(stream, _selectedFile.Name, _importVersion, _importMode == "diff");
+            _importResult = await Api.ImportCatalogAsync(stream, _selectedFile.Name, _importVersion, activate: _activateAfterImport);
             await ReloadAfterImport();
             Toast.Success($"Successfully imported {_importResult.TotalParsed} policies!");
         }
@@ -387,9 +445,57 @@ else if (_stats is null && !_loading)
         _stats = await Api.GetCatalogStatsAsync();
         _categories = await Api.GetCatalogCategoriesAsync();
         _entries = await Api.GetCatalogAsync();
+        _templates = await Api.GetCatalogTemplatesAsync();
         ApplyFilters();
         await CheckLatestVersionAsync();
     }
+
+    private async Task ActivateTemplate(AdmxTemplateDto t)
+    {
+        _templateBusy = true;
+        try
+        {
+            await Api.ActivateTemplateAsync(t.Id);
+            Toast.Success($"Template {t.Version} is now Active.");
+            await ReloadAfterImport();
+        }
+        catch (Exception ex) { Toast.Error($"Activate failed: {ex.Message}"); }
+        finally { _templateBusy = false; }
+    }
+
+    private async Task RetireTemplate(AdmxTemplateDto t)
+    {
+        _templateBusy = true;
+        try
+        {
+            await Api.RetireTemplateAsync(t.Id);
+            Toast.Success($"Template {t.Version} retired.");
+            await ReloadAfterImport();
+        }
+        catch (Exception ex) { Toast.Error($"Retire failed: {ex.Message}"); }
+        finally { _templateBusy = false; }
+    }
+
+    private async Task DeleteTemplate(AdmxTemplateDto t)
+    {
+        _templateBusy = true;
+        try
+        {
+            await Api.DeleteTemplateAsync(t.Id);
+            Toast.Success($"Template {t.Version} deleted.");
+            await ReloadAfterImport();
+        }
+        catch (Exception ex) { Toast.Error($"Delete failed: {ex.Message}"); }
+        finally { _templateBusy = false; }
+    }
+
+    private static string StatusBadge(string status) => status switch
+    {
+        "Active" => "success",
+        "Staged" => "info",
+        "Retired" => "secondary",
+        _ => "light"
+    };
 
     private void ClearSearch() { _searchText = ""; ApplyFilters(); }
 

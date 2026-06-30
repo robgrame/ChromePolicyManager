@@ -31,10 +31,10 @@ public class PolicyApiClient
         return (await response.Content.ReadFromJsonAsync<PolicySetDto>(JsonOptions))!;
     }
 
-    public async Task<VersionResponseDto> CreateVersionAsync(Guid policySetId, string version, string settingsJson)
+    public async Task<VersionResponseDto> CreateVersionAsync(Guid policySetId, string version, string settingsJson, string? admxVersion = null)
     {
         var response = await _http.PostAsJsonAsync($"/api/policies/{policySetId}/versions", 
-            new { version, settingsJson });
+            new { version, settingsJson, admxVersion });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<VersionResponseDto>(JsonOptions))!;
     }
@@ -163,9 +163,10 @@ public class PolicyApiClient
     }
 
     // === Catalog ===
-    public async Task<List<PolicyCatalogEntryDto>> GetCatalogAsync(string? category = null, string? search = null, bool? recommended = null)
+    public async Task<List<PolicyCatalogEntryDto>> GetCatalogAsync(string? category = null, string? search = null, bool? recommended = null, string? version = null)
     {
         var query = new List<string>();
+        if (!string.IsNullOrEmpty(version)) query.Add($"version={Uri.EscapeDataString(version)}");
         if (!string.IsNullOrEmpty(category)) query.Add($"category={Uri.EscapeDataString(category)}");
         if (!string.IsNullOrEmpty(search)) query.Add($"search={Uri.EscapeDataString(search)}");
         if (recommended.HasValue) query.Add($"recommended={recommended.Value}");
@@ -178,9 +179,10 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<PolicyCatalogEntryDto>($"/api/catalog/{id}", JsonOptions);
     }
 
-    public async Task<List<string>> GetCatalogCategoriesAsync()
+    public async Task<List<string>> GetCatalogCategoriesAsync(string? version = null)
     {
-        return await _http.GetFromJsonAsync<List<string>>("/api/catalog/categories", JsonOptions) ?? [];
+        var qs = string.IsNullOrEmpty(version) ? "" : $"?version={Uri.EscapeDataString(version)}";
+        return await _http.GetFromJsonAsync<List<string>>($"/api/catalog/categories{qs}", JsonOptions) ?? [];
     }
 
     public async Task<CatalogStatsDto> GetCatalogStatsAsync()
@@ -193,20 +195,59 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<LatestVersionDto>("/api/catalog/latest-available", JsonOptions) ?? new();
     }
 
-    public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version, bool diffMode = false)
+    // === ADMX template registry (Option B) ===
+    public async Task<List<AdmxTemplateDto>> GetCatalogTemplatesAsync()
+    {
+        return await _http.GetFromJsonAsync<List<AdmxTemplateDto>>("/api/catalog/templates", JsonOptions) ?? [];
+    }
+
+    public async Task ActivateTemplateAsync(Guid id)
+    {
+        var response = await _http.PostAsync($"/api/catalog/templates/{id}/activate", null);
+        await EnsureCatalogSuccess(response);
+    }
+
+    public async Task RetireTemplateAsync(Guid id)
+    {
+        var response = await _http.PostAsync($"/api/catalog/templates/{id}/retire", null);
+        await EnsureCatalogSuccess(response);
+    }
+
+    public async Task DeleteTemplateAsync(Guid id)
+    {
+        var response = await _http.DeleteAsync($"/api/catalog/templates/{id}");
+        await EnsureCatalogSuccess(response);
+    }
+
+    private static async Task EnsureCatalogSuccess(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var body = await response.Content.ReadAsStringAsync();
+        string message = body;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var err))
+                message = err.GetString() ?? body;
+        }
+        catch { /* non-JSON body, use raw */ }
+        throw new HttpRequestException(string.IsNullOrWhiteSpace(message) ? $"Request failed ({(int)response.StatusCode})" : message);
+    }
+
+    public async Task<CatalogImportResultDto> ImportCatalogAsync(Stream zipStream, string fileName, string version, bool activate = false)
     {
         using var content = new MultipartFormDataContent();
         content.Add(new StreamContent(zipStream), "admxZip", fileName);
         content.Add(new StringContent(version), "version");
-        content.Add(new StringContent(diffMode.ToString().ToLower()), "diffMode");
+        content.Add(new StringContent(activate.ToString().ToLower()), "activate");
         var response = await _http.PostAsync("/api/catalog/import", content);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
     }
 
-    public async Task<CatalogImportResultDto> ImportCatalogFromUrlAsync(string version, bool diffMode = false)
+    public async Task<CatalogImportResultDto> ImportCatalogFromUrlAsync(string version, bool activate = false)
     {
-        var url = $"/api/catalog/import-from-url?version={Uri.EscapeDataString(version)}&diffMode={diffMode.ToString().ToLower()}";
+        var url = $"/api/catalog/import-from-url?version={Uri.EscapeDataString(version)}&activate={activate.ToString().ToLower()}";
         var response = await _http.PostAsync(url, null);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<CatalogImportResultDto>(JsonOptions))!;
@@ -398,7 +439,25 @@ public class CatalogImportResultDto
     public int Added { get; set; }
     public int Removed { get; set; }
     public int Updated { get; set; }
+    public Guid TemplateId { get; set; }
+    public string Status { get; set; } = "";
+    public bool Activated { get; set; }
     public List<string> Warnings { get; set; } = [];
+}
+
+public class AdmxTemplateDto
+{
+    public Guid Id { get; set; }
+    public string Version { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public string Source { get; set; } = "";
+    public string Status { get; set; } = "";
+    public int PolicyCount { get; set; }
+    public int MandatoryCount { get; set; }
+    public int RecommendedCount { get; set; }
+    public int CategoryCount { get; set; }
+    public DateTime ImportedAt { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class EntraGroupDto
