@@ -305,13 +305,13 @@ così l'admin non si aspetta che la user-policy "vinca".
 
 | # | Workstream | Esito |
 |---|---|---|
-| 1 | Modello dati: `PolicyTarget` + migration + default Machine | ⏳ |
-| 2 | API: `GetUserGroupMembershipsAsync` + endpoint `/api/v2/users/{upn}/effective-policy` + `/api/v2/devices/...` (bucket machine) + ETag separati | ⏳ |
-| 3 | Admin UI: selettore `Target`, badge, validazione tipo-gruppo, avviso conflitti chiave | ⏳ |
-| 4 | Client: `Apply-UserChromePolicy.ps1` (contesto utente) + `Remove-StaleKeys` per-utente + binding `dsregcmd` | ⏳ |
-| 5 | Client: orchestrazione scheduled task da SYSTEM + aggregazione esiti | ⏳ |
-| 6 | Reporting per (device, utente) + dashboard | ⏳ |
-| 7 | Documentazione admin: precedenza machine/user, best practice no-overlap | ⏳ |
+| 1 | Modello dati: `PolicyTarget` + migration + default Machine | ✅ |
+| 2 | API: `GetUserGroupMembershipsAsync` + endpoint `/api/v2/users/{upn}/effective-policy` + `/api/v2/devices/...` (bucket machine) + ETag separati | ✅ |
+| 3 | Admin UI: selettore `Target`, badge, validazione tipo-gruppo, avviso conflitti chiave | ✅ |
+| 4 | Client: `Apply-UserChromePolicy.ps1` (contesto utente) + `Remove-StaleKeys` per-utente + binding `dsregcmd` | ✅ |
+| 5 | Client: orchestrazione scheduled task da SYSTEM + aggregazione esiti | ✅ |
+| 6 | Reporting per (device, utente) + dashboard | ✅ |
+| 7 | Documentazione admin: precedenza machine/user, best practice no-overlap → [`user-level-policies-admin-guide.md`](./user-level-policies-admin-guide.md) | ✅ |
 
 ---
 

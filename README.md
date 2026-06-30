@@ -64,6 +64,7 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 | **PolicySet Versioning** | Immutable versions (Draft → Active → Archived) with hash-based change detection |
 | **Group-Based Targeting** | Assign policies to Entra ID security groups with priority-based conflict resolution |
 | **Mandatory & Recommended** | Support both Chrome policy scopes per assignment |
+| **Machine & User Targeting** | Apply policies to the device (`HKLM`) or per logged-on user (`HKCU`) — see the [User-Level Policies Admin Guide](docs/user-level-policies-admin-guide.md) |
 | **Effective Policy Resolution** | Server resolves device → groups → assignments → merged settings (lower priority wins) |
 | **Device Observability** | Real-time compliance dashboard, offline detection, error tracking |
 | **Device Log Ingestion** | Centralized log collection from detection/remediation scripts with level filtering |
