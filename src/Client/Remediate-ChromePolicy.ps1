@@ -497,6 +497,210 @@ function Send-ComplianceReport {
     }
 }
 
+# ============================================================================
+#  User-policy orchestration (ADR-002 §5.2)
+#  SYSTEM cannot write a user's HKCU directly, so for every interactive logon we
+#  run Apply-UserChromePolicy.ps1 as that user through a transient scheduled task,
+#  then read the cross-context result and aggregate the outcome.
+# ============================================================================
+
+# Where Apply-UserChromePolicy.ps1 lives. Resolved at runtime; copied to a
+# world-readable ProgramData path so user-context tasks can read it.
+$UserScriptDeployPath = "$env:ProgramData\ChromePolicyManager\Apply-UserChromePolicy.ps1"
+
+function Resolve-UserScriptPath {
+    # 1) explicit override, 2) next to this script, 3) already-deployed copy.
+    $candidates = @(
+        [Environment]::GetEnvironmentVariable("CPM_USER_SCRIPT", "Machine"),
+        (Join-Path $PSScriptRoot "Apply-UserChromePolicy.ps1"),
+        $UserScriptDeployPath
+    )
+    foreach ($c in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($c) -and (Test-Path $c)) { return $c }
+    }
+    return $null
+}
+
+function Get-LoggedOnInteractiveUsers {
+    # Returns objects with Sid + Account (DOMAIN\user) for each interactive session,
+    # derived from explorer.exe owners (one shell per interactive desktop session).
+    $users = @{}
+    try {
+        $explorers = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue
+        foreach ($p in $explorers) {
+            try {
+                $owner = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction SilentlyContinue
+                if ($owner -and $owner.User) {
+                    $account = if ($owner.Domain) { "$($owner.Domain)\$($owner.User)" } else { $owner.User }
+                    if (-not $users.ContainsKey($account)) {
+                        try {
+                            $sid = (New-Object System.Security.Principal.NTAccount($account)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        }
+                        catch { $sid = $null }
+                        if ($sid) { $users[$account] = $sid }
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+    catch { Write-Log "Failed to enumerate interactive users: $_" "WARN" }
+    return $users.GetEnumerator() | ForEach-Object { [PSCustomObject]@{ Account = $_.Key; Sid = $_.Value } }
+}
+
+function Grant-CertPrivateKeyRead {
+    # Grants the user temporary read access to the device cert's private key so the
+    # user-context mTLS call can use it. Returns the key file path (for later revoke)
+    # or $null. Best-effort; supports CNG keys (CPM device certs).
+    param(
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert,
+        [string]$Account
+    )
+    try {
+        $keyName = $null
+        $rsaCng = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Cert)
+        if ($rsaCng -and $rsaCng.Key -and $rsaCng.Key.UniqueName) { $keyName = $rsaCng.Key.UniqueName }
+        if (-not $keyName) { Write-Log "Cannot resolve private key container for ACL grant" "WARN"; return $null }
+
+        $keyFile = Join-Path "$env:ProgramData\Microsoft\Crypto\Keys" $keyName
+        if (-not (Test-Path $keyFile)) {
+            $keyFile = Join-Path "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys" $keyName
+        }
+        if (-not (Test-Path $keyFile)) { Write-Log "Private key file not found for ACL grant" "WARN"; return $null }
+
+        $acl = Get-Acl $keyFile
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($Account, "Read", "Allow")
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $keyFile -AclObject $acl
+        Write-Log "Granted private-key read to $Account on $keyName"
+        return $keyFile
+    }
+    catch { Write-Log "Grant-CertPrivateKeyRead failed for ${Account}: $_" "WARN"; return $null }
+}
+
+function Revoke-CertPrivateKeyRead {
+    param([string]$KeyFile, [string]$Account)
+    if ([string]::IsNullOrWhiteSpace($KeyFile) -or -not (Test-Path $KeyFile)) { return }
+    try {
+        $acl = Get-Acl $KeyFile
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($Account, "Read", "Allow")
+        $acl.RemoveAccessRule($rule) | Out-Null
+        Set-Acl -Path $KeyFile -AclObject $acl
+        Write-Log "Revoked private-key read from $Account"
+    }
+    catch { Write-Log "Revoke-CertPrivateKeyRead failed for ${Account}: $_" "WARN" }
+}
+
+function Invoke-UserPolicyTask {
+    # Registers, runs and cleans up a transient scheduled task that executes the user
+    # script as $User.Account, then reads the result JSON from that user's profile.
+    param(
+        [PSCustomObject]$User,
+        [string]$UserScriptPath,
+        [string]$DeviceId
+    )
+    $taskName = "CPM-ApplyUserPolicy-$($User.Sid)"
+    $result = [PSCustomObject]@{ Account = $User.Account; Status = "Unknown"; KeysWritten = 0; KeysRemoved = 0; Error = "" }
+    try {
+        $argLine = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$UserScriptPath`" -DeviceId `"$DeviceId`""
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argLine
+        $principal = New-ScheduledTaskPrincipal -UserId $User.Account -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        $task = New-ScheduledTask -Action $action -Principal $principal -Settings $settings
+
+        Register-ScheduledTask -TaskName $taskName -InputObject $task -Force -ErrorAction Stop | Out-Null
+        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+        # Poll until the task is no longer running (max ~5 min).
+        $deadline = (Get-Date).AddMinutes(5)
+        do {
+            Start-Sleep -Seconds 3
+            $info = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            $state = if ($info) { $info.State } else { "Ready" }
+        } while ($state -eq "Running" -and (Get-Date) -lt $deadline)
+
+        # Read the result JSON from the user's LOCALAPPDATA via the HKEY_USERS\<SID> profile path.
+        $result = Read-UserTaskResult -User $User
+    }
+    catch {
+        $result.Status = "Failed"
+        $result.Error = "$_"
+        Write-Log "User task failed for $($User.Account): $_" "ERROR"
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    return $result
+}
+
+function Read-UserTaskResult {
+    param([PSCustomObject]$User)
+    $result = [PSCustomObject]@{ Account = $User.Account; Status = "Unknown"; KeysWritten = 0; KeysRemoved = 0; Error = "" }
+    try {
+        # Resolve the user's profile dir from the registry (ProfileList by SID).
+        $profileKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($User.Sid)"
+        if (Test-Path $profileKey) {
+            $profileDir = (Get-ItemProperty -Path $profileKey -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
+            if ($profileDir) {
+                $resultFile = Join-Path $profileDir "AppData\Local\ChromePolicyManager\user-result.json"
+                if (Test-Path $resultFile) {
+                    $json = Get-Content -Path $resultFile -Raw | ConvertFrom-Json
+                    $result.Status = $json.status
+                    $result.KeysWritten = [int]$json.keysWritten
+                    $result.KeysRemoved = [int]$json.keysRemoved
+                    $result.Error = $json.error
+                    return $result
+                }
+            }
+        }
+        $result.Status = "NoResult"
+    }
+    catch { $result.Status = "ReadError"; $result.Error = "$_" }
+    return $result
+}
+
+function Invoke-UserPolicyOrchestration {
+    # Top-level: deploy the user script, enumerate sessions, run a task per user,
+    # aggregate. Returns @{ Total; Succeeded; Failed; Details }.
+    param(
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ClientCert,
+        [string]$DeviceId
+    )
+    $summary = @{ Total = 0; Succeeded = 0; Failed = 0; Details = @() }
+
+    $src = Resolve-UserScriptPath
+    if (-not $src) {
+        Write-Log "Apply-UserChromePolicy.ps1 not found; skipping user-policy orchestration" "WARN"
+        return $summary
+    }
+    # Stage a world-readable copy so user-context tasks can read it.
+    try {
+        $deployDir = Split-Path $UserScriptDeployPath -Parent
+        if (-not (Test-Path $deployDir)) { New-Item -ItemType Directory -Path $deployDir -Force | Out-Null }
+        if ($src -ne $UserScriptDeployPath) { Copy-Item -Path $src -Destination $UserScriptDeployPath -Force }
+    }
+    catch { Write-Log "Failed to stage user script: $_" "WARN"; return $summary }
+
+    $users = @(Get-LoggedOnInteractiveUsers)
+    Write-Log "Interactive users detected: $($users.Count)"
+    if ($users.Count -eq 0) { return $summary }
+
+    foreach ($u in $users) {
+        $summary.Total++
+        $keyFile = Grant-CertPrivateKeyRead -Cert $ClientCert -Account $u.Account
+        try {
+            $r = Invoke-UserPolicyTask -User $u -UserScriptPath $UserScriptDeployPath -DeviceId $DeviceId
+            if ($r.Status -eq "Success") { $summary.Succeeded++ } else { $summary.Failed++ }
+            $summary.Details += $r
+            Write-Log "User $($u.Account): $($r.Status) (written=$($r.KeysWritten), removed=$($r.KeysRemoved))"
+        }
+        finally {
+            Revoke-CertPrivateKeyRead -KeyFile $keyFile -Account $u.Account
+        }
+    }
+    return $summary
+}
+
 # ============ Main Remediation Logic ============
 $script:ExitCode = 1
 $script:ClientCertForLog = $null
@@ -634,7 +838,21 @@ try {
         -KeysWritten $keysWritten -KeysRemoved $keysRemoved
     
     Write-Log "Remediation complete: $keysWritten written, $keysRemoved removed, Status: $status"
-    Write-Output "SUCCESS: $keysWritten policies applied, $keysRemoved stale removed. Hash: $serverHash"
+
+    # ----- User-policy orchestration (ADR-002 §5.2): apply HKCU policies per logged-on user -----
+    $userSummary = $null
+    try {
+        $userSummary = Invoke-UserPolicyOrchestration -ClientCert $clientCert -DeviceId $deviceId
+        if ($userSummary.Total -gt 0) {
+            Write-Log "User-policy orchestration: $($userSummary.Succeeded)/$($userSummary.Total) succeeded, $($userSummary.Failed) failed"
+        }
+    }
+    catch {
+        Write-Log "User-policy orchestration error: $_" "WARN"
+    }
+
+    $userMsg = if ($userSummary -and $userSummary.Total -gt 0) { " | users: $($userSummary.Succeeded)/$($userSummary.Total) ok" } else { "" }
+    Write-Output "SUCCESS: $keysWritten policies applied, $keysRemoved stale removed. Hash: $serverHash$userMsg"
     $script:ExitCode = 0
 }
 catch {
