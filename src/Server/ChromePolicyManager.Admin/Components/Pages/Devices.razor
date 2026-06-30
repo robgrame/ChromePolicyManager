@@ -36,6 +36,12 @@
             @if (_errorCount > 0) { <span class="badge text-bg-danger ms-1">@_errorCount</span> }
         </button>
     </li>
+    <li class="nav-item">
+        <button class="nav-link @(_tab == 3 ? "active" : "")" @onclick="LoadUserStatesTab">
+            <i class="bi bi-person-badge me-1"></i> User Policies
+            @if (_userStates.Count > 0) { <span class="badge text-bg-secondary ms-1">@_userStates.Count</span> }
+        </button>
+    </li>
 </ul>
 
 @if (_tab == 0)
@@ -146,7 +152,7 @@ else if (_tab == 1)
         <div class="alert alert-success">All devices have checked in recently.</div>
     }
 }
-else
+else if (_tab == 2)
 {
     @if (_errorDevices.Any())
     {
@@ -174,12 +180,73 @@ else
         <div class="alert alert-success">No devices reporting errors.</div>
     }
 }
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-3">
+        <span class="text-secondary small">User-level (HKCU) Chrome policy state per logged-on user, by device.</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="LoadUserStates">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+    @if (_loadingUserStates)
+    {
+        <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_userStates.Any())
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle mb-0">
+                    <thead>
+                        <tr><th>User</th><th>Device</th><th>Status</th><th>Policy Hash</th><th>Keys</th><th>Last Contact</th><th>Err</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in _userStates)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center gap-1">
+                                        <i class="bi bi-person-fill text-brand"></i>
+                                        <strong>@u.UserPrincipalName</strong>
+                                    </div>
+                                </td>
+                                <td class="mono small" title="@u.DeviceId">@Truncate(u.DeviceId, 8)…</td>
+                                <td><span class="badge text-bg-@StatusBadge(u.Status)">@u.Status</span></td>
+                                <td class="mono small" title="@(u.AppliedPolicyHash ?? "None")">@Truncate(u.AppliedPolicyHash, 12)</td>
+                                <td>
+                                    <span class="badge text-bg-success-subtle text-success">+@u.PolicyKeysWritten</span>
+                                    @if (u.PolicyKeysRemoved > 0) { <span class="badge text-bg-warning-subtle text-warning ms-1">-@u.PolicyKeysRemoved</span> }
+                                </td>
+                                <td title="@u.LastContact.ToLocalTime().ToString("F")">@RelTime(u.LastContact)</td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(u.Errors))
+                                    {
+                                        <i class="bi bi-exclamation-triangle-fill text-danger" title="@u.Errors"></i>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">
+            No user-level policy reports yet. They appear after a device runs the user-policy
+            orchestration for a logged-on user assigned to a <code>Target = User</code> policy.
+        </div>
+    }
+}
 
 @code {
     private int _tab = 0;
     private MonitoringDashboardDto? _dashboard;
     private List<DeviceStateDto> _offlineDevices = [];
     private List<DeviceStateDto> _errorDevices = [];
+    private List<UserPolicyStateDto> _userStates = [];
+    private bool _loadingUserStates;
     private bool _loadingDashboard = true;
     private string _searchString = "";
     private int _offlineHours = 24;
@@ -316,6 +383,20 @@ else
             _errorCount = _errorDevices.Count;
         }
         catch { _errorDevices = []; }
+    }
+
+    private async Task LoadUserStatesTab()
+    {
+        _tab = 3;
+        await LoadUserStates();
+    }
+
+    private async Task LoadUserStates()
+    {
+        _loadingUserStates = true;
+        try { _userStates = await Api.GetUserPolicyStatesAsync(); }
+        catch { _userStates = []; }
+        finally { _loadingUserStates = false; }
     }
 
     private IEnumerable<DeviceStateDto> Filtered(IEnumerable<DeviceStateDto> items) =>

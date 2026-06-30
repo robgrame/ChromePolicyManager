@@ -347,12 +347,13 @@ function Send-UserComplianceReport {
     )
     try {
         $headers = @{ "Content-Type" = "application/json" }
+        $complianceStatus = if ($Status -eq "Success") { "Compliant" } else { "Error" }
         $report = @{
             deviceId          = $DeviceId
             userPrincipalName = $Upn
             target            = "User"
             appliedPolicyHash = $PolicyHash
-            status            = $Status
+            status            = $complianceStatus
             errors            = $Errors
             policyKeysWritten = $KeysWritten
             policyKeysRemoved = $KeysRemoved

@@ -150,6 +150,11 @@ public class PolicyApiClient
         return await _http.GetFromJsonAsync<List<DeviceStateDto>>("/api/monitoring/errors", JsonOptions) ?? [];
     }
 
+    public async Task<List<UserPolicyStateDto>> GetUserPolicyStatesAsync()
+    {
+        return await _http.GetFromJsonAsync<List<UserPolicyStateDto>>("/api/monitoring/user-states", JsonOptions) ?? [];
+    }
+
     public async Task<PushRemediationDispatchResultDto> TriggerDeviceRemediationAsync(string deviceId)
     {
         var response = await _http.PostAsync($"/api/monitoring/devices/{deviceId}/trigger-remediation", null);
@@ -329,6 +334,18 @@ public class DeviceStateDto
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
     public string? ScriptVersion { get; set; }
+    public DateTime LastContact { get; set; }
+    public int PolicyKeysWritten { get; set; }
+    public int PolicyKeysRemoved { get; set; }
+}
+
+public class UserPolicyStateDto
+{
+    public string DeviceId { get; set; } = "";
+    public string UserPrincipalName { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? AppliedPolicyHash { get; set; }
+    public string? Errors { get; set; }
     public DateTime LastContact { get; set; }
     public int PolicyKeysWritten { get; set; }
     public int PolicyKeysRemoved { get; set; }

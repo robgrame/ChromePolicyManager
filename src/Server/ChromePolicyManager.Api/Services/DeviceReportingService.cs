@@ -116,6 +116,59 @@ public class DeviceReportingService
             .Take(count)
             .ToListAsync();
     }
+
+    // ---- User-level (HKCU) reporting, ADR-002 §7 ----
+
+    public async Task<UserPolicyReport> SubmitUserReportAsync(UserPolicyReportRequest request)
+    {
+        var report = new UserPolicyReport
+        {
+            DeviceId = request.DeviceId ?? string.Empty,
+            UserPrincipalName = request.UserPrincipalName,
+            AppliedPolicyHash = request.AppliedPolicyHash ?? string.Empty,
+            Status = request.Status,
+            Errors = request.Errors,
+            PolicyKeysWritten = request.PolicyKeysWritten,
+            PolicyKeysRemoved = request.PolicyKeysRemoved,
+            AzureAdPrt = request.AzureAdPrt,
+            ReportedAt = DateTime.UtcNow
+        };
+
+        _db.UserPolicyReports.Add(report);
+
+        var state = await _db.UserPolicyStates.FindAsync(report.DeviceId, report.UserPrincipalName);
+        if (state == null)
+        {
+            state = new UserPolicyState { DeviceId = report.DeviceId, UserPrincipalName = report.UserPrincipalName };
+            _db.UserPolicyStates.Add(state);
+        }
+
+        state.LastAppliedPolicyHash = report.AppliedPolicyHash;
+        state.LastStatus = report.Status;
+        state.LastCheckIn = DateTime.UtcNow;
+        state.LastError = report.Status == DeviceComplianceStatus.Error ? report.Errors : null;
+        state.PolicyKeysWritten = report.PolicyKeysWritten;
+        state.PolicyKeysRemoved = report.PolicyKeysRemoved;
+
+        await _db.SaveChangesAsync();
+        return report;
+    }
+
+    public async Task<List<UserPolicyReport>> GetUserHistoryAsync(string upn, int count = 20)
+    {
+        return await _db.UserPolicyReports
+            .Where(r => r.UserPrincipalName == upn)
+            .OrderByDescending(r => r.ReportedAt)
+            .Take(count)
+            .ToListAsync();
+    }
+
+    public async Task<List<UserPolicyState>> GetUserStatesAsync()
+    {
+        return await _db.UserPolicyStates
+            .OrderByDescending(s => s.LastCheckIn)
+            .ToListAsync();
+    }
 }
 
 public class DeviceReportRequest
@@ -135,6 +188,19 @@ public class DeviceReportRequest
     public string? ScriptVersion { get; set; }
     public int? PolicyKeysWritten { get; set; }
     public int? PolicyKeysRemoved { get; set; }
+}
+
+public class UserPolicyReportRequest
+{
+    public string? DeviceId { get; set; }
+    public string UserPrincipalName { get; set; } = string.Empty;
+    public string Target { get; set; } = "User";
+    public string? AppliedPolicyHash { get; set; }
+    public DeviceComplianceStatus Status { get; set; }
+    public string? Errors { get; set; }
+    public int? PolicyKeysWritten { get; set; }
+    public int? PolicyKeysRemoved { get; set; }
+    public string? AzureAdPrt { get; set; }
 }
 
 public class MonitoringDashboard

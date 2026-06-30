@@ -83,6 +83,23 @@ public static class MonitoringEndpoints
             }));
         }).WithName("GetErrorDevices");
 
+        // User-level (HKCU) policy states per (device, user) — ADR-002 §7.
+        group.MapGet("/user-states", async (DeviceReportingService service) =>
+        {
+            var states = await service.GetUserStatesAsync();
+            return Results.Ok(states.Select(s => new
+            {
+                s.DeviceId,
+                s.UserPrincipalName,
+                Status = s.LastStatus.ToString(),
+                AppliedPolicyHash = s.LastAppliedPolicyHash,
+                Errors = s.LastError,
+                LastContact = s.LastCheckIn ?? DateTime.MinValue,
+                PolicyKeysWritten = s.PolicyKeysWritten ?? 0,
+                PolicyKeysRemoved = s.PolicyKeysRemoved ?? 0
+            }));
+        }).WithName("GetUserPolicyStates");
+
         // Trigger on-demand proactive remediation for a single device
         group.MapPost("/devices/{deviceId}/trigger-remediation", async (string deviceId, PushRemediationService pushService) =>
         {

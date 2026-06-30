@@ -12,6 +12,8 @@ public class AppDbContext : DbContext
     public DbSet<PolicyAssignment> PolicyAssignments => Set<PolicyAssignment>();
     public DbSet<DeviceReport> DeviceReports => Set<DeviceReport>();
     public DbSet<DeviceState> DeviceStates => Set<DeviceState>();
+    public DbSet<UserPolicyReport> UserPolicyReports => Set<UserPolicyReport>();
+    public DbSet<UserPolicyState> UserPolicyStates => Set<UserPolicyState>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<PolicyCatalogEntry> PolicyCatalog => Set<PolicyCatalogEntry>();
     public DbSet<DeviceLog> DeviceLogs => Set<DeviceLog>();
@@ -49,6 +51,19 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<DeviceState>(e =>
         {
             e.HasKey(x => x.DeviceId);
+            e.HasIndex(x => x.LastCheckIn);
+        });
+
+        modelBuilder.Entity<UserPolicyReport>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.DeviceId, x.UserPrincipalName });
+            e.HasIndex(x => x.ReportedAt);
+        });
+
+        modelBuilder.Entity<UserPolicyState>(e =>
+        {
+            e.HasKey(x => new { x.DeviceId, x.UserPrincipalName });
             e.HasIndex(x => x.LastCheckIn);
         });
 

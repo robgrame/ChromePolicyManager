@@ -63,6 +63,33 @@ public static class V2Endpoints
             httpContext.Response.Headers.CacheControl = "no-cache";
             return Results.Ok(result);
         }).WithName("GetUserEffectivePolicyV2");
+
+        // User compliance ingestion (per device,user) — ADR-002 §7.
+        users.MapPost("/{upn}/report", async (string upn, UserPolicyReportRequest request,
+            DeviceReportingService service) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.UserPrincipalName))
+                request.UserPrincipalName = upn;
+            else if (!string.Equals(request.UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest("UPN in URL must match body");
+
+            var report = await service.SubmitUserReportAsync(request);
+            return Results.Ok(new { ReportId = report.Id, Received = report.ReportedAt });
+        }).WithName("SubmitUserReportV2");
+
+        // Per-user compliance history.
+        users.MapGet("/{upn}/history", async (string upn, DeviceReportingService service, int? count) =>
+        {
+            var history = await service.GetUserHistoryAsync(upn, count ?? 20);
+            return Results.Ok(history);
+        }).WithName("GetUserHistoryV2");
+
+        // Dashboard: latest user-policy state per (device,user).
+        users.MapGet("/states", async (DeviceReportingService service) =>
+        {
+            var states = await service.GetUserStatesAsync();
+            return Results.Ok(states);
+        }).WithName("GetUserStatesV2");
     }
 }
 
