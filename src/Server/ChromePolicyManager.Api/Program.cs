@@ -182,6 +182,42 @@ var app = builder.Build();
             IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PolicySetVersions') AND name = 'AdmxVersion')
                 ALTER TABLE PolicySetVersions ADD AdmxVersion NVARCHAR(50) NULL;
 
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PolicyAssignments') AND name = 'Target')
+                ALTER TABLE PolicyAssignments ADD Target INT NOT NULL DEFAULT 0;
+
+            IF OBJECT_ID('UserPolicyReports', 'U') IS NULL
+            CREATE TABLE UserPolicyReports (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                DeviceId NVARCHAR(450) NOT NULL,
+                UserPrincipalName NVARCHAR(450) NOT NULL,
+                AppliedPolicyHash NVARCHAR(128) NOT NULL,
+                Status INT NOT NULL,
+                Errors NVARCHAR(MAX) NULL,
+                PolicyKeysWritten INT NULL,
+                PolicyKeysRemoved INT NULL,
+                AzureAdPrt NVARCHAR(50) NULL,
+                ReportedAt DATETIME2 NOT NULL
+            );
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_UserPolicyReports_DeviceId_UserPrincipalName' AND object_id = OBJECT_ID('UserPolicyReports'))
+                CREATE INDEX IX_UserPolicyReports_DeviceId_UserPrincipalName ON UserPolicyReports (DeviceId, UserPrincipalName);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_UserPolicyReports_ReportedAt' AND object_id = OBJECT_ID('UserPolicyReports'))
+                CREATE INDEX IX_UserPolicyReports_ReportedAt ON UserPolicyReports (ReportedAt);
+
+            IF OBJECT_ID('UserPolicyStates', 'U') IS NULL
+            CREATE TABLE UserPolicyStates (
+                DeviceId NVARCHAR(450) NOT NULL,
+                UserPrincipalName NVARCHAR(450) NOT NULL,
+                LastAppliedPolicyHash NVARCHAR(128) NULL,
+                LastStatus INT NOT NULL,
+                LastCheckIn DATETIME2 NULL,
+                LastError NVARCHAR(MAX) NULL,
+                PolicyKeysWritten INT NULL,
+                PolicyKeysRemoved INT NULL,
+                CONSTRAINT PK_UserPolicyStates PRIMARY KEY (DeviceId, UserPrincipalName)
+            );
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_UserPolicyStates_LastCheckIn' AND object_id = OBJECT_ID('UserPolicyStates'))
+                CREATE INDEX IX_UserPolicyStates_LastCheckIn ON UserPolicyStates (LastCheckIn);
+
             IF OBJECT_ID('PrivilegedCommands', 'U') IS NULL
             CREATE TABLE PrivilegedCommands (
                 Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
