@@ -27,7 +27,7 @@ else
             <table class="table table-hover table-striped align-middle mb-0">
                 <thead>
                     <tr>
-                        <th>Group</th><th>Scope</th><th>Priority</th><th>Policy Version</th>
+                        <th>Group</th><th>Scope</th><th>Target</th><th>Priority</th><th>Policy Version</th>
                         <th>Enabled</th><th>Push Remediation</th><th>Actions</th>
                     </tr>
                 </thead>
@@ -41,6 +41,7 @@ else
                                 </div>
                             </td>
                             <td><span class="badge text-bg-@(a.Scope == PolicyScope.Mandatory ? "danger" : "info")">@(a.Scope == PolicyScope.Mandatory ? "Mandatory" : "Recommended")</span></td>
+                            <td><span class="badge text-bg-@(a.Target == PolicyTarget.User ? "warning" : "secondary")"><i class="bi @(a.Target == PolicyTarget.User ? "bi-person" : "bi-pc-display")"></i> @(a.Target == PolicyTarget.User ? "User" : "Machine")</span></td>
                             <td><span class="badge text-bg-light border">@a.Priority</span></td>
                             <td class="mono small">@a.PolicySetVersionId.ToString()[..8]…</td>
                             <td>

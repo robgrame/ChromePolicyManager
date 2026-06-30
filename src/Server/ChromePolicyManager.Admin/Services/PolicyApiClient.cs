@@ -72,11 +72,11 @@ public class PolicyApiClient
     }
 
     public async Task<AssignmentDto> CreateAssignmentAsync(Guid policySetVersionId, string entraGroupId, 
-        string groupName, int priority, int scope, bool pushRemediationEnabled)
+        string groupName, int priority, int scope, bool pushRemediationEnabled, int target = 0)
     {
         var response = await _http.PostAsJsonAsync("/api/assignments", new
         {
-            policySetVersionId, entraGroupId, groupName, priority, scope, pushRemediationEnabled
+            policySetVersionId, entraGroupId, groupName, priority, scope, pushRemediationEnabled, target
         });
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(await ExtractErrorMessageAsync(response));
@@ -100,11 +100,11 @@ public class PolicyApiClient
     }
 
     public async Task<AssignmentDto> UpdateAssignmentAsync(Guid assignmentId, string? entraGroupId, 
-        string? groupName, int? priority, int? scope)
+        string? groupName, int? priority, int? scope, int? target = null)
     {
         var response = await _http.PutAsJsonAsync($"/api/assignments/{assignmentId}", new
         {
-            entraGroupId, groupName, priority, scope
+            entraGroupId, groupName, priority, scope, target
         });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>(JsonOptions))!;
@@ -280,6 +280,7 @@ public class ValidationResultDto
 public enum PolicyVersionStatus { Draft, Active, Archived }
 
 public enum PolicyScope { Mandatory = 0, Recommended = 1 }
+public enum PolicyTarget { Machine = 0, User = 1 }
 
 public class AssignmentDto
 {
@@ -289,6 +290,7 @@ public class AssignmentDto
     public string GroupName { get; set; } = "";
     public int Priority { get; set; }
     public PolicyScope Scope { get; set; } // serialized by the API as "Mandatory"/"Recommended"
+    public PolicyTarget Target { get; set; } // "Machine" (HKLM) / "User" (HKCU)
     public bool Enabled { get; set; }
     public bool PushRemediationEnabled { get; set; }
     public DateTime CreatedAt { get; set; }

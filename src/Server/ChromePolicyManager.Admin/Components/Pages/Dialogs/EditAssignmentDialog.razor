@@ -48,12 +48,33 @@
         <div class="form-text">Lower number = higher priority (wins on conflict)</div>
     </div>
     <div class="mb-1">
+        <label class="form-label">Target</label>
+        <select class="form-select" @bind="_target">
+            <option value="0">Machine (device)</option>
+            <option value="1">User (signed-in user)</option>
+        </select>
+        <div class="form-text">
+            Machine → <span class="mono">HKLM</span> (device groups) ·
+            User → <span class="mono">HKCU</span> (signed-in user's groups)
+        </div>
+    </div>
+    @if (_target == 1)
+    {
+        <div class="alert alert-warning py-2 d-flex align-items-start gap-2 mt-2">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>
+                <strong>User target:</strong> assign an Entra group that contains <em>users</em>.
+                For the same key and scope, a Machine (HKLM) mandatory policy wins over User (HKCU).
+            </span>
+        </div>
+    }
+    <div class="mb-1 mt-3">
         <label class="form-label">Scope</label>
         <select class="form-select" @bind="_scope">
             <option value="0">Mandatory</option>
             <option value="1">Recommended</option>
         </select>
-        <div class="form-text">Mandatory → HKLM\...\Chrome, Recommended → ...\Chrome\Recommended</div>
+        <div class="form-text">Mandatory → ...\Chrome, Recommended → ...\Chrome\Recommended (under the selected hive)</div>
     </div>
     </ChildContent>
 
@@ -73,6 +94,7 @@
     private string _groupSearch = "";
     private int _priority;
     private int _scope;
+    private int _target;
     private List<EntraGroupDto> _results = [];
     private bool _searching;
     private Guid _loadedFor;
@@ -85,6 +107,7 @@
             _loadedFor = Assignment.Id;
             _priority = Assignment.Priority;
             _scope = (int)Assignment.Scope;
+            _target = (int)Assignment.Target;
             _selectedGroup = new EntraGroupDto { Id = Assignment.EntraGroupId, DisplayName = Assignment.GroupName };
             _groupSearch = Assignment.GroupName;
             _results = [];
@@ -129,15 +152,16 @@
             string? groupName = entraGroupId != null ? _selectedGroup.DisplayName : null;
             int? priority = _priority != Assignment.Priority ? _priority : null;
             int? scope = _scope != (int)Assignment.Scope ? _scope : null;
+            int? target = _target != (int)Assignment.Target ? _target : null;
 
-            if (entraGroupId == null && priority == null && scope == null)
+            if (entraGroupId == null && priority == null && scope == null && target == null)
             {
                 Toast.Info("No changes detected");
                 await Close();
                 return;
             }
 
-            await Api.UpdateAssignmentAsync(Assignment.Id, entraGroupId, groupName, priority, scope);
+            await Api.UpdateAssignmentAsync(Assignment.Id, entraGroupId, groupName, priority, scope, target);
             Toast.Success("Assignment updated!");
             await Close();
             await OnCompleted.InvokeAsync();
