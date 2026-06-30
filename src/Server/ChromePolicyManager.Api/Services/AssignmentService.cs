@@ -56,7 +56,8 @@ public class AssignmentService
     public async Task<PolicyAssignment> CreateAssignmentAsync(
         Guid policySetVersionId, string entraGroupId, string groupName,
         int priority, PolicyScope scope = PolicyScope.Mandatory,
-        bool pushRemediationEnabled = false, string? actor = null)
+        bool pushRemediationEnabled = false, string? actor = null,
+        PolicyTarget target = PolicyTarget.Machine)
     {
         // Guard the unique (PolicySetVersionId, EntraGroupId) index with a friendly error
         // instead of letting the SQL duplicate-key violation surface as a raw 500.
@@ -72,6 +73,7 @@ public class AssignmentService
             GroupName = groupName,
             Priority = priority,
             Scope = scope,
+            Target = target,
             PushRemediationEnabled = pushRemediationEnabled,
             CreatedBy = actor
         };
@@ -86,7 +88,7 @@ public class AssignmentService
             throw new DuplicateAssignmentException(groupName);
         }
         await _audit.LogAsync("Assignment.Created", actor, "PolicyAssignment", assignment.Id.ToString(),
-            $"Group: {groupName}, Priority: {priority}, Scope: {scope}, PushRemediationEnabled: {pushRemediationEnabled}");
+            $"Group: {groupName}, Priority: {priority}, Scope: {scope}, Target: {target}, PushRemediationEnabled: {pushRemediationEnabled}");
 
         if (pushRemediationEnabled)
         {
@@ -122,7 +124,8 @@ public class AssignmentService
 
     public async Task<PolicyAssignment?> UpdateAssignmentAsync(
         Guid assignmentId, string? entraGroupId, string? groupName,
-        int? priority, PolicyScope? scope, string? actor = null)
+        int? priority, PolicyScope? scope, string? actor = null,
+        PolicyTarget? target = null)
     {
         var assignment = await _db.PolicyAssignments.FindAsync(assignmentId);
         if (assignment == null) return null;
@@ -143,6 +146,11 @@ public class AssignmentService
         {
             changes.Add($"Scope: {assignment.Scope} → {scope.Value}");
             assignment.Scope = scope.Value;
+        }
+        if (target.HasValue && target.Value != assignment.Target)
+        {
+            changes.Add($"Target: {assignment.Target} → {target.Value}");
+            assignment.Target = target.Value;
         }
 
         if (changes.Count > 0)

@@ -26,7 +26,9 @@ public static class AssignmentEndpoints
                     request.GroupName,
                     request.Priority,
                     request.Scope,
-                    request.PushRemediationEnabled);
+                    request.PushRemediationEnabled,
+                    actor: null,
+                    target: request.Target);
                 return Results.Created($"/api/assignments/{assignment.Id}", assignment);
             }
             catch (DuplicateAssignmentException ex)
@@ -37,7 +39,7 @@ public static class AssignmentEndpoints
 
         group.MapPut("/{id:guid}", async (Guid id, [FromBody] UpdateAssignmentRequest request, AssignmentService service) =>
         {
-            var assignment = await service.UpdateAssignmentAsync(id, request.EntraGroupId, request.GroupName, request.Priority, request.Scope);
+            var assignment = await service.UpdateAssignmentAsync(id, request.EntraGroupId, request.GroupName, request.Priority, request.Scope, actor: null, target: request.Target);
             return assignment is null ? Results.NotFound() : Results.Ok(assignment);
         }).WithName("UpdateAssignment");
 
@@ -82,8 +84,9 @@ public record CreateAssignmentRequest(
     string GroupName,
     int Priority,
     PolicyScope Scope = PolicyScope.Mandatory,
-    bool PushRemediationEnabled = false);
+    bool PushRemediationEnabled = false,
+    PolicyTarget Target = PolicyTarget.Machine);
 
 public record UpdatePriorityRequest(int Priority);
 public record UpdatePushRemediationRequest(bool Enabled, bool TriggerNow = false);
-public record UpdateAssignmentRequest(string? EntraGroupId, string? GroupName, int? Priority, PolicyScope? Scope);
+public record UpdateAssignmentRequest(string? EntraGroupId, string? GroupName, int? Priority, PolicyScope? Scope, PolicyTarget? Target = null);

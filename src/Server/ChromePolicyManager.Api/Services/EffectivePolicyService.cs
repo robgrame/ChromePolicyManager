@@ -22,37 +22,69 @@ public class EffectivePolicyService
     }
 
     /// <summary>
-    /// Get the effective policy for a device by resolving group memberships and merging policies by priority.
+    /// Get the effective MACHINE policy for a device: Target=Machine assignments resolved by the
+    /// device's Entra group memberships, merged by priority. Backwards-compatible v1 contract.
     /// </summary>
     public async Task<EffectivePolicyResult> GetEffectivePolicyAsync(string deviceId)
     {
-        // 1. Resolve device group memberships from Microsoft Graph (server-side, trusted)
+        // Resolve device group memberships from Microsoft Graph (server-side, trusted)
         var groupIds = await _graphService.GetDeviceGroupMembershipsAsync(deviceId);
+        var (mandatory, recommended, applied) = await ResolveBucketsAsync(groupIds, PolicyTarget.Machine);
+        var hashInput = JsonSerializer.Serialize(mandatory) + JsonSerializer.Serialize(recommended);
 
-        // 2. Find all active assignments targeting those groups
-        var assignments = await _db.PolicyAssignments
-            .Include(a => a.PolicySetVersion)
-            .Where(a => a.Enabled && groupIds.Contains(a.EntraGroupId))
-            .Where(a => a.PolicySetVersion.Status == PolicyVersionStatus.Active)
-            .OrderBy(a => a.Priority)
-            .ToListAsync();
-
-        if (!assignments.Any())
+        return new EffectivePolicyResult
         {
-            return new EffectivePolicyResult
-            {
-                DeviceId = deviceId,
-                MandatoryPolicies = new Dictionary<string, object>(),
-                RecommendedPolicies = new Dictionary<string, object>(),
-                Hash = ComputeHash("{}{}"),
-                AppliedAssignments = new List<AppliedAssignmentInfo>()
-            };
-        }
+            DeviceId = deviceId,
+            MandatoryPolicies = mandatory,
+            RecommendedPolicies = recommended,
+            Hash = ComputeHash(hashInput),
+            AppliedAssignments = applied
+        };
+    }
 
-        // 3. Merge policies by priority (lower number wins per key)
+    /// <summary>
+    /// Get the effective USER policy for a signed-in user: Target=User assignments resolved by the
+    /// user's Entra group memberships, merged by priority. Targets the HKCU hive on the client.
+    /// </summary>
+    public async Task<UserEffectivePolicyResult> GetUserEffectivePolicyAsync(string upn)
+    {
+        // Resolve user group memberships from Microsoft Graph (server-side, trusted)
+        var groupIds = await _graphService.GetUserGroupMembershipsAsync(upn);
+        var (mandatory, recommended, applied) = await ResolveBucketsAsync(groupIds, PolicyTarget.User);
+        var hashInput = JsonSerializer.Serialize(mandatory) + JsonSerializer.Serialize(recommended);
+
+        return new UserEffectivePolicyResult
+        {
+            Upn = upn,
+            UserMandatory = mandatory,
+            UserRecommended = recommended,
+            UserHash = ComputeHash(hashInput),
+            AppliedAssignments = applied
+        };
+    }
+
+    /// <summary>
+    /// Resolve and merge the mandatory/recommended buckets for a set of Entra groups and a given
+    /// registry target. First writer wins per key (lowest Priority number).
+    /// </summary>
+    private async Task<(Dictionary<string, object> Mandatory, Dictionary<string, object> Recommended, List<AppliedAssignmentInfo> Applied)>
+        ResolveBucketsAsync(List<string> groupIds, PolicyTarget target)
+    {
         var mandatoryPolicies = new Dictionary<string, object>();
         var recommendedPolicies = new Dictionary<string, object>();
         var appliedAssignments = new List<AppliedAssignmentInfo>();
+
+        if (groupIds.Count == 0)
+            return (mandatoryPolicies, recommendedPolicies, appliedAssignments);
+
+        // Find all active assignments for this target whose group the identity belongs to
+        var assignments = await _db.PolicyAssignments
+            .Include(a => a.PolicySetVersion)
+                .ThenInclude(v => v.PolicySet)
+            .Where(a => a.Enabled && a.Target == target && groupIds.Contains(a.EntraGroupId))
+            .Where(a => a.PolicySetVersion.Status == PolicyVersionStatus.Active)
+            .OrderBy(a => a.Priority)
+            .ToListAsync();
 
         foreach (var assignment in assignments)
         {
@@ -86,16 +118,7 @@ public class EffectivePolicyService
             }
         }
 
-        var hashInput = JsonSerializer.Serialize(mandatoryPolicies) + JsonSerializer.Serialize(recommendedPolicies);
-
-        return new EffectivePolicyResult
-        {
-            DeviceId = deviceId,
-            MandatoryPolicies = mandatoryPolicies,
-            RecommendedPolicies = recommendedPolicies,
-            Hash = ComputeHash(hashInput),
-            AppliedAssignments = appliedAssignments
-        };
+        return (mandatoryPolicies, recommendedPolicies, appliedAssignments);
     }
 
     private static object ConvertJsonElement(JsonElement element)
@@ -125,6 +148,19 @@ public class EffectivePolicyResult
     public Dictionary<string, object> MandatoryPolicies { get; set; } = new();
     public Dictionary<string, object> RecommendedPolicies { get; set; } = new();
     public string Hash { get; set; } = string.Empty;
+    public List<AppliedAssignmentInfo> AppliedAssignments { get; set; } = new();
+}
+
+/// <summary>
+/// v2 user-scoped effective policy (HKCU). Buckets are resolved from Target=User assignments
+/// against the signed-in user's Entra group memberships.
+/// </summary>
+public class UserEffectivePolicyResult
+{
+    public string Upn { get; set; } = string.Empty;
+    public Dictionary<string, object> UserMandatory { get; set; } = new();
+    public Dictionary<string, object> UserRecommended { get; set; } = new();
+    public string UserHash { get; set; } = string.Empty;
     public List<AppliedAssignmentInfo> AppliedAssignments { get; set; } = new();
 }
 

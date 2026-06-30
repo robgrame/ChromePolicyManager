@@ -83,8 +83,41 @@ public class GraphService : IGraphService
         }
     }
 
-    public async Task<List<EntraGroupInfo>> SearchGroupsAsync(string query, int top = 10)
+    public async Task<List<string>> GetUserGroupMembershipsAsync(string userId)
     {
+        try
+        {
+            // userId may be a UPN or an object ID — both are valid keys for Users[].
+            // TransitiveMemberOf captures nested group memberships (matches ADR-002 §4.3).
+            var memberOf = await _graphClient.Users[userId].TransitiveMemberOf.GetAsync(config =>
+            {
+                config.QueryParameters.Top = 100;
+            });
+
+            var groupIds = new List<string>();
+            if (memberOf?.Value != null)
+            {
+                var pageIterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
+                    .CreatePageIterator(_graphClient, memberOf, (item) =>
+                    {
+                        if (item is Group g && g.Id != null)
+                            groupIds.Add(g.Id);
+                        return true;
+                    });
+                await pageIterator.IterateAsync();
+            }
+
+            _logger.LogInformation("User {UserId} is member of {Count} groups", userId, groupIds.Count);
+            return groupIds.Distinct().ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve group memberships for user {UserId}", userId);
+            return new List<string>();
+        }
+    }
+
+    public async Task<List<EntraGroupInfo>> SearchGroupsAsync(string query, int top = 10)    {
         try
         {
             var result = await _graphClient.Groups.GetAsync(config =>

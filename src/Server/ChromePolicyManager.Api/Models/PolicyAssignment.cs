@@ -8,6 +8,7 @@ public class PolicyAssignment
     public string GroupName { get; set; } = string.Empty;
     public int Priority { get; set; } = 100; // Lower number = higher priority
     public PolicyScope Scope { get; set; } = PolicyScope.Mandatory;
+    public PolicyTarget Target { get; set; } = PolicyTarget.Machine;
     public bool Enabled { get; set; } = true;
     public bool PushRemediationEnabled { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -18,6 +19,16 @@ public class PolicyAssignment
 
 public enum PolicyScope
 {
-    Mandatory,   // HKLM\SOFTWARE\Policies\Google\Chrome
-    Recommended  // HKLM\SOFTWARE\Policies\Google\Chrome\Recommended
+    Mandatory,   // ...\Policies\Google\Chrome
+    Recommended  // ...\Policies\Google\Chrome\Recommended
+}
+
+/// <summary>
+/// Registry hive the policy targets. Orthogonal to <see cref="PolicyScope"/>:
+/// the (Target, Scope) pair selects one of four registry destinations.
+/// </summary>
+public enum PolicyTarget
+{
+    Machine = 0, // HKLM\SOFTWARE\Policies\Google\Chrome[\Recommended] — resolved by device groups
+    User    = 1  // HKCU\SOFTWARE\Policies\Google\Chrome[\Recommended] — resolved by the signed-in user's groups
 }

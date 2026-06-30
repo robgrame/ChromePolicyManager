@@ -11,6 +11,12 @@ public interface IGraphService
     Task<List<string>> GetDeviceGroupMembershipsAsync(string deviceId);
 
     /// <summary>
+    /// Get the Entra ID (transitive) group memberships for a user, by UPN or object ID
+    /// (server-side, trusted).
+    /// </summary>
+    Task<List<string>> GetUserGroupMembershipsAsync(string userId);
+
+    /// <summary>
     /// Search Entra ID groups by display name prefix/substring.
     /// </summary>
     Task<List<EntraGroupInfo>> SearchGroupsAsync(string query, int top = 10);

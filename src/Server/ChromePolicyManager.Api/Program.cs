@@ -223,6 +223,7 @@ app.UseApimGateway();
 app.MapPolicyEndpoints();
 app.MapAssignmentEndpoints();
 app.MapDeviceEndpoints();
+app.MapV2Endpoints();
 app.MapMonitoringEndpoints();
 app.MapCatalogEndpoints();
 app.MapWebhookEndpoints();
