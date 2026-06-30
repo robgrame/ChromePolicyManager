@@ -61,6 +61,7 @@ Chrome Policy Manager implements a **server-side policy resolution engine** that
 | Feature | Description |
 |---------|-------------|
 | **ADMX Catalog Ingestion** | Parse Chrome ADMX/ADML templates → browse 700+ policies with descriptions, types, categories |
+| **Multi-Version ADMX Registry** | Multiple Chrome ADMX template versions coexist with lifecycle states (Staged → Active → Retired); pick which ADMX version each PolicySet version is authored against, with no 20-template cap and clean version deletion |
 | **PolicySet Versioning** | Immutable versions (Draft → Active → Archived) with hash-based change detection |
 | **Group-Based Targeting** | Assign policies to Entra ID security groups with priority-based conflict resolution |
 | **Mandatory & Recommended** | Support both Chrome policy scopes per assignment |
@@ -82,7 +83,7 @@ Compliance overview at a glance — total devices, compliant/error/offline count
 ![Dashboard](docs/screenshots/1.png)
 
 ### Policy Catalog
-Browse the ingested Chrome ADMX catalog (722 policies) with search, category/scope filters, type badges and an "update available" banner when Google ships a newer template.
+Browse the ingested Chrome ADMX catalog (722 policies) with search, category/scope filters, type badges and an "update available" banner when Google ships a newer template. The **ADMX template registry** lists every imported version with its status (Staged / Active / Retired) and policy counts — activate, retire or delete versions inline, and import a new version without losing the previous ones.
 
 ![Policy Catalog](docs/screenshots/2.png)
 
@@ -92,7 +93,7 @@ Per-policy editor with inline description, value guidance, target PolicySet sele
 ![Add Policy to PolicySet](docs/screenshots/3.png)
 
 ### PolicySet Versions
-Immutable, hash-tracked versions per PolicySet — inspect the resolved Chrome policy keys (JSON) for any version, with the Chrome ADMX template version it was built against.
+Immutable, hash-tracked versions per PolicySet — inspect the resolved Chrome policy keys (JSON) for any version, and choose which Chrome ADMX template version each one is authored against (defaults to the Active template, snapshotted on the version).
 
 ![PolicySet Versions](docs/screenshots/4.png)
 
@@ -203,7 +204,9 @@ The tier is selected by the `skuTier` Bicep parameter (defaults from `environmen
 Download the [Chrome ADMX templates](https://chromeenterprise.google/browser/download/#manage-policies-tab) and upload via the Admin UI or API:
 
 ```bash
-# Via API (multipart upload)
+# Via API (multipart upload). Add -F "activate=true" to make this the Active
+# template immediately; otherwise it is imported as Staged and coexists with
+# the current Active version until you activate it from the registry.
 curl -X POST https://your-api.azurewebsites.net/api/catalog/import \
   -F "admxZip=@policy_templates.zip" \
   -F "version=136.0"
@@ -231,12 +234,16 @@ The deployment script automatically creates a Proactive Remediation in Intune th
 ### Policy Catalog
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/catalog` | Browse policy catalog (filter: `?category=&search=&dataType=&recommended=`) |
+| `GET` | `/api/catalog` | Browse policy catalog (filter: `?category=&search=&dataType=&recommended=&version=`; `version` selects which ADMX template, defaults to Active) |
 | `GET` | `/api/catalog/{id}` | Get full details for a single catalog entry |
-| `GET` | `/api/catalog/categories` | List available categories |
+| `GET` | `/api/catalog/categories` | List available categories (`?version=` to target a specific ADMX template) |
 | `GET` | `/api/catalog/stats` | Import statistics |
-| `POST` | `/api/catalog/import` | Import ADMX zip (multipart/form-data) |
-| `POST` | `/api/catalog/import-from-url` | Download and import ADMX templates from a URL |
+| `GET` | `/api/catalog/templates` | List imported ADMX template versions (status, counts, imported date) |
+| `POST` | `/api/catalog/templates/{id}/activate` | Make a version the Active template (demotes the previous Active to Retired) |
+| `POST` | `/api/catalog/templates/{id}/retire` | Retire a non-active version |
+| `DELETE` | `/api/catalog/templates/{id}` | Delete a version (blocked while Active or referenced by a Draft policy version) |
+| `POST` | `/api/catalog/import` | Import ADMX zip (multipart/form-data; `activate` to set Active after import) |
+| `POST` | `/api/catalog/import-from-url` | Download and import ADMX templates from a URL (`?activate=`) |
 | `POST` | `/api/catalog/import-local` | Import ADMX from a local server path |
 
 ### Policy Management
